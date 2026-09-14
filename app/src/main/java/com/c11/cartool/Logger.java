@@ -8,21 +8,24 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 日志系统: Logcat + UI 回调 + 命令日志
+ * 日志系统: Logcat + UI 回调 + 命令日志 + 性能监控
  */
 public final class Logger {
     private static final String TAG = "C11CarTool";
     private static final SimpleDateFormat TS =
-            new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
+            new SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault());
 
     public enum Level { STEP, INFO, OK, WARN, FAIL, TITLE, CMD }
 
     public interface Callback { void onLog(String line, Level level); }
+    public interface PerfCallback { void onPerf(String cmd, long durationMs); }
 
     private static Callback cb;
+    private static PerfCallback perfCb;
     private static final List<String> cmdLog = new ArrayList<>();
 
     public static void setCallback(Callback c) { cb = c; }
+    public static void setPerfCallback(PerfCallback c) { perfCb = c; }
 
     public static void title(String msg) { log(Level.TITLE, msg); }
     public static void step(String msg)  { log(Level.STEP,  msg); }
@@ -32,7 +35,8 @@ public final class Logger {
     public static void fail(String msg)  { log(Level.FAIL,  msg); }
 
     public static void cmd(String command, Sh.Result result) {
-        String entry = "$ " + command + "\n  exit=" + result.exit
+        String entry = TS.format(new Date()) + " $ " + command
+                + "\n  exit=" + result.exit
                 + " out=\"" + trunc(result.out, 300) + "\""
                 + " err=\"" + trunc(result.err, 100) + "\"";
         synchronized (cmdLog) { cmdLog.add(entry); }
@@ -40,9 +44,13 @@ public final class Logger {
     }
 
     public static void cmd(String command, String output) {
-        String entry = "$ " + command + "\n  → " + trunc(output, 300);
+        String entry = TS.format(new Date()) + " $ " + command + "\n  → " + trunc(output, 300);
         synchronized (cmdLog) { cmdLog.add(entry); }
         log(Level.CMD, command + " → " + trunc(output, 100));
+    }
+
+    public static void onPerf(String cmd, long durationMs) {
+        if (perfCb != null) perfCb.onPerf(cmd, durationMs);
     }
 
     private static String trunc(String s, int max) {
@@ -57,6 +65,22 @@ public final class Logger {
 
     public static void clearCmdLog() {
         synchronized (cmdLog) { cmdLog.clear(); }
+    }
+
+    /**
+     * 导出全部日志 (含时间戳)
+     */
+    public static String exportAll() {
+        StringBuilder sb = new StringBuilder();
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
+        sb.append("# C11 车控测试 日志\n");
+        sb.append("# 导出时间: ").append(sdf.format(new Date())).append("\n\n");
+        synchronized (cmdLog) {
+            for (String entry : cmdLog) {
+                sb.append(entry).append("\n");
+            }
+        }
+        return sb.toString();
     }
 
     private static void log(Level lv, String msg) {
