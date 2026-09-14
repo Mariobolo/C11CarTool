@@ -1,0 +1,38 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    compileSdk 28
+    namespace 'com.c11.cartool'
+
+    defaultConfig {
+        applicationId "com.c11.cartool"
+        minSdk 28
+        targetSdk 28
+        versionCode 1
+        versionName "2.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+        debug {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    // 不使用 AndroidX (兼容车机 Android 9)
+    useLibrary 'android.test.base'
+    useLibrary 'android.test.mock'
+}
+
+dependencies {
+    // 无外部依赖，纯 Android SDK
+}
