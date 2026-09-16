@@ -205,11 +205,11 @@ public class CarControlFragment extends Fragment {
     private void refreshData() {
         new Thread(() -> {
             try {
-                // 通过 settings get / getprop 获取车辆数据
-                String speed = Sh.out("settings get global vehicle_speed 2>/dev/null || echo '--'");
-                String battery = Sh.out("settings get global battery_soc 2>/dev/null || getprop persist.sys.battery.soc 2>/dev/null || echo '--'");
-                String range = Sh.out("settings get global vehicle_range 2>/dev/null || echo '--'");
-                String odo = Sh.out("settings get global vehicle_odo 2>/dev/null || echo '--'");
+                // 通过 settings get / getprop 获取车辆数据（不隐藏错误，用 Result 检查）
+                String speed = readSettingOrProp("vehicle_speed", null);
+                String battery = readSettingOrProp("battery_soc", "persist.sys.battery.soc");
+                String range = readSettingOrProp("vehicle_range", null);
+                String odo = readSettingOrProp("vehicle_odo", null);
 
                 h.post(() -> {
                     setDataValue(speedView, speed);
@@ -221,6 +221,23 @@ public class CarControlFragment extends Fragment {
                 Logger.warn("刷新车辆数据失败: " + e.getMessage());
             }
         }).start();
+    }
+
+    /**
+     * 读取设置或属性，失败时返回明确的错误提示
+     */
+    private String readSettingOrProp(String settingKey, String propKey) {
+        Sh.Result r = Sh.run("settings get global " + settingKey);
+        if (r.ok() && !r.trim().isEmpty()) {
+            return r.trim();
+        }
+        if (propKey != null) {
+            Sh.Result r2 = Sh.run("getprop " + propKey);
+            if (r2.ok() && !r2.trim().isEmpty()) {
+                return r2.trim();
+            }
+        }
+        return "--";
     }
 
     private void setDataValue(View card, String value) {

@@ -32,6 +32,54 @@ public final class Sh {
     /** 默认超时时间（毫秒） */
     public static final long DEFAULT_TIMEOUT_MS = 10000;
 
+    // ═══ ADB 连接管理 ═══
+    private static AdbClient adbClient = null;
+    private static final Object adbLock = new Object();
+
+    /**
+     * 连接到本地 adbd (127.0.0.1:5555)
+     * 连接成功后，所有命令将通过 adb shell 执行，获得 shell uid(2000) 权限
+     */
+    public static boolean connectAdb(String host, int port, int timeoutMs) {
+        synchronized (adbLock) {
+            if (adbClient != null && adbClient.isConnected()) {
+                Logger.info(TAG, "ADB 已连接，无需重复连接");
+                return true;
+            }
+            adbClient = new AdbClient(host, port);
+            boolean ok = adbClient.connect(timeoutMs);
+            if (ok) {
+                Logger.ok(TAG, "ADB 模式已启用，命令将通过 adb shell 执行 (uid=2000)");
+            } else {
+                adbClient = null;
+            }
+            return ok;
+        }
+    }
+
+    /** 便捷方法：连接本地 adbd */
+    public static boolean connectLocalAdb() {
+        return connectAdb("127.0.0.1", 5555, 5000);
+    }
+
+    /** 断开 ADB 连接 */
+    public static void disconnectAdb() {
+        synchronized (adbLock) {
+            if (adbClient != null) {
+                adbClient.close();
+                adbClient = null;
+                Logger.info(TAG, "ADB 已断开，恢复本地 shell 模式");
+            }
+        }
+    }
+
+    /** 检查 ADB 是否已连接 */
+    public static boolean isAdbConnected() {
+        synchronized (adbLock) {
+            return adbClient != null && adbClient.isConnected();
+        }
+    }
+
     public static class Result {
         public final int exit;
         public final String out;
@@ -81,6 +129,24 @@ public final class Sh {
      * @param timeoutMs 超时时间（毫秒），0 表示不超时
      */
     public static Result run(String cmd, long timeoutMs) {
+        // 如果 ADB 已连接，通过 adb shell 执行（获得 shell uid=2000 权限）
+        if (isAdbConnected()) {
+            synchronized (adbLock) {
+                if (adbClient != null && adbClient.isConnected()) {
+                    Result r = adbClient.shell(cmd, timeoutMs);
+                    // 记录日志
+                    if (!r.ok()) {
+                        Logger.warn(TAG, "[ADB] 命令失败(exit=" + r.exit + "): " + cmd + "\n" + r.toDiagnosticString());
+                    } else {
+                        Logger.debug(TAG, "[ADB] 命令成功(" + r.durationMs + "ms): " + cmd);
+                    }
+                    Logger.onPerf(cmd, r.durationMs);
+                    return r;
+                }
+            }
+        }
+
+        // 本地 shell 模式（应用 uid）
         long start = System.currentTimeMillis();
         Process p = null;
         try {

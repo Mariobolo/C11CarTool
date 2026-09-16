@@ -59,7 +59,6 @@ public class MainActivity extends Activity {
     private String adbHost = "127.0.0.1";
     private int adbPort = 5555;
     private boolean adbCustom = false;
-    private boolean adbConnected = false;
 
     // 性能监控
     private long lastCmdTime = 0;
@@ -158,20 +157,8 @@ public class MainActivity extends Activity {
     }
 
     // ═══════════════════════════════════════
-    //  ADB 连接管理
+    //  ADB 连接管理（使用 Sh 中的 AdbClient）
     // ═══════════════════════════════════════
-
-    private void connectAdb() {
-        if (adbCustom) {
-            String result = Sh.out("connect " + adbHost + ":" + adbPort);
-            adbConnected = result.contains("connected");
-            Logger.info("ADB 连接 " + adbHost + ":" + adbPort + " → " + result);
-        } else {
-            // 本地模式，直接检查
-            String id = Sh.out("id");
-            adbConnected = id.contains("uid=");
-        }
-    }
 
     // ═══════════════════════════════════════
     //  UI 构建
@@ -527,79 +514,128 @@ public class MainActivity extends Activity {
     private void buildSettingsTab() {
         contentArea.addView(makeSectionTitle("⚙️ 设置"));
 
-        // ADB 连接
-        contentArea.addView(makeSectionTitle("📡 ADB 连接"));
+        // ═══ ADB 连接管理（真实 ADB 客户端） ═══
+        contentArea.addView(makeSectionTitle("📡 ADB Shell 连接（获取 shell uid=2000 权限）"));
 
-        LinearLayout adbRow = new LinearLayout(this);
-        adbRow.setOrientation(LinearLayout.HORIZONTAL);
-        adbRow.setBackgroundColor(darkTheme ? C_CARD : C_LIGHT_CARD);
-        adbRow.setPadding(8, 6, 8, 6);
-        adbRow.setGravity(Gravity.CENTER_VERTICAL);
+        // 连接状态
+        boolean adbConnected = Sh.isAdbConnected();
+        LinearLayout statusRow = new LinearLayout(this);
+        statusRow.setOrientation(LinearLayout.HORIZONTAL);
+        statusRow.setBackgroundColor(darkTheme ? C_CARD : C_LIGHT_CARD);
+        statusRow.setPadding(8, 6, 8, 6);
+        statusRow.setGravity(Gravity.CENTER_VERTICAL);
 
-        TextView adbLabel = new TextView(this);
-        adbLabel.setText("连接模式:");
-        adbLabel.setTextColor(darkTheme ? C_TEXT : C_LIGHT_TEXT);
-        adbLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        adbRow.addView(adbLabel);
+        TextView statusLabel = new TextView(this);
+        statusLabel.setText("状态:");
+        statusLabel.setTextColor(darkTheme ? C_TEXT : C_LIGHT_TEXT);
+        statusLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        statusRow.addView(statusLabel);
 
-        Button localBtn = makeSmallBtn("本地", adbCustom ? C_SURFACE : C_GREEN, v -> {
-            adbCustom = false;
-            prefs.edit().putBoolean("adb_custom", false).apply();
-            new Thread(() -> { connectAdb(); h.post(() -> switchTab(TAB_NAMES.length - 1)); }).start();
-        });
-        adbRow.addView(localBtn);
-
-        Button customBtn = makeSmallBtn("自定义", adbCustom ? C_GREEN : C_SURFACE, v -> {
-            adbCustom = true;
-            prefs.edit().putBoolean("adb_custom", true).apply();
-            switchTab(TAB_NAMES.length - 1);
-        });
-        adbRow.addView(customBtn);
-
-        contentArea.addView(adbRow);
-
-        if (adbCustom) {
-            LinearLayout addrRow = new LinearLayout(this);
-            addrRow.setOrientation(LinearLayout.HORIZONTAL);
-            addrRow.setBackgroundColor(darkTheme ? C_CARD : C_LIGHT_CARD);
-            addrRow.setPadding(8, 6, 8, 6);
-            addrRow.setGravity(Gravity.CENTER_VERTICAL);
-
-            EditText hostEt = new EditText(this);
-            hostEt.setText(adbHost);
-            hostEt.setTextColor(C_YELLOW);
-            hostEt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            hostEt.setBackgroundColor(darkTheme ? C_SURFACE : C_LIGHT_SURFACE);
-            hostEt.setPadding(6, 2, 6, 2);
-            addrRow.addView(hostEt, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-            TextView colon = new TextView(this);
-            colon.setText(":");
-            colon.setTextColor(C_DIM);
-            addrRow.addView(colon);
-
-            EditText portEt = new EditText(this);
-            portEt.setText(String.valueOf(adbPort));
-            portEt.setTextColor(C_YELLOW);
-            portEt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            portEt.setBackgroundColor(darkTheme ? C_SURFACE : C_LIGHT_SURFACE);
-            portEt.setPadding(6, 2, 6, 2);
-            portEt.setInputType(InputType.TYPE_CLASS_NUMBER);
-            addrRow.addView(portEt, new LinearLayout.LayoutParams(80, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-            Button connectBtn = makeSmallBtn("连接", C_BLUE, v -> {
-                adbHost = hostEt.getText().toString().trim();
-                try { adbPort = Integer.parseInt(portEt.getText().toString().trim()); } catch (Exception e) {}
-                prefs.edit().putString("adb_host", adbHost).putInt("adb_port", adbPort).apply();
-                new Thread(() -> { connectAdb(); h.post(() -> {
-                    Logger.ok("ADB 连接 " + (adbConnected ? "成功" : "失败"));
-                    switchTab(TAB_NAMES.length - 1);
-                }); }).start();
-            });
-            addrRow.addView(connectBtn);
-
-            contentArea.addView(addrRow);
+        TextView statusValue = new TextView(this);
+        if (adbConnected) {
+            statusValue.setText("✅ 已连接 (shell uid=2000)");
+            statusValue.setTextColor(C_GREEN);
+        } else {
+            statusValue.setText("❌ 未连接 (应用 uid=10107)");
+            statusValue.setTextColor(C_RED);
         }
+        statusValue.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        statusValue.setTypeface(Typeface.DEFAULT_BOLD);
+        statusRow.addView(statusValue);
+        contentArea.addView(statusRow);
+
+        // 说明
+        TextView adbHint = new TextView(this);
+        adbHint.setText("连接后所有命令通过 adb shell 执行，可突破零跑系统的 MANAGE_USERS 权限限制，读取/写入 settings、执行 am broadcast、读取系统 logcat。\n\n前提：车机已开启 WiFi ADB（通过系统 demo 软件按钮开启）");
+        adbHint.setTextColor(C_DIM);
+        adbHint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        adbHint.setPadding(8, 4, 8, 8);
+        contentArea.addView(adbHint);
+
+        // 连接按钮行
+        LinearLayout connRow = new LinearLayout(this);
+        connRow.setOrientation(LinearLayout.HORIZONTAL);
+        connRow.setPadding(0, 4, 0, 4);
+        connRow.addView(makeSmallBtn("🔌 连接本地 adbd", C_GREEN, v -> {
+            new Thread(() -> {
+                Logger.info("正在连接本地 adbd (127.0.0.1:5555)...");
+                boolean ok = Sh.connectLocalAdb();
+                h.post(() -> {
+                    if (ok) {
+                        Logger.ok("ADB 连接成功！当前 shell uid: " + Sh.out("id -u"));
+                        // 连接成功后自动授权
+                        autoGrantPermissions();
+                    } else {
+                        Logger.error("ADB 连接失败，请确认 WiFi ADB 已开启");
+                    }
+                    switchTab(TAB_NAMES.length - 1);
+                });
+            }).start();
+        }));
+        connRow.addView(makeSmallBtn("🔌 断开", C_RED, v -> {
+            Sh.disconnectAdb();
+            Logger.info("ADB 已断开，恢复本地 shell 模式");
+            switchTab(TAB_NAMES.length - 1);
+        }));
+        contentArea.addView(connRow);
+
+        // 自定义地址
+        LinearLayout addrRow = new LinearLayout(this);
+        addrRow.setOrientation(LinearLayout.HORIZONTAL);
+        addrRow.setBackgroundColor(darkTheme ? C_CARD : C_LIGHT_CARD);
+        addrRow.setPadding(8, 6, 8, 6);
+        addrRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        EditText hostEt = new EditText(this);
+        hostEt.setText(adbHost);
+        hostEt.setTextColor(C_YELLOW);
+        hostEt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        hostEt.setBackgroundColor(darkTheme ? C_SURFACE : C_LIGHT_SURFACE);
+        hostEt.setPadding(6, 2, 6, 2);
+        addrRow.addView(hostEt, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView colon = new TextView(this);
+        colon.setText(":");
+        colon.setTextColor(C_DIM);
+        addrRow.addView(colon);
+
+        EditText portEt = new EditText(this);
+        portEt.setText(String.valueOf(adbPort));
+        portEt.setTextColor(C_YELLOW);
+        portEt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        portEt.setBackgroundColor(darkTheme ? C_SURFACE : C_LIGHT_SURFACE);
+        portEt.setPadding(6, 2, 6, 2);
+        portEt.setInputType(InputType.TYPE_CLASS_NUMBER);
+        addrRow.addView(portEt, new LinearLayout.LayoutParams(80, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        addrRow.addView(makeSmallBtn("连接", C_BLUE, v -> {
+            final String host = hostEt.getText().toString().trim();
+            int port = 5555;
+            try { port = Integer.parseInt(portEt.getText().toString().trim()); } catch (Exception ignored) {}
+            final int p = port;
+            adbHost = host; adbPort = p;
+            prefs.edit().putString("adb_host", host).putInt("adb_port", p).apply();
+            new Thread(() -> {
+                boolean ok = Sh.connectAdb(host, p, 5000);
+                h.post(() -> {
+                    Logger.ok(ok ? "ADB 连接成功" : "ADB 连接失败");
+                    if (ok) autoGrantPermissions();
+                    switchTab(TAB_NAMES.length - 1);
+                });
+            }).start();
+        }));
+        contentArea.addView(addrRow);
+
+        // 测试 ADB 命令
+        contentArea.addView(makeBtn("🧪 测试 ADB 连接 (执行 id 命令)", C_CYAN, v -> {
+            new Thread(() -> {
+                Sh.Result r = Sh.run("id");
+                h.post(() -> {
+                    Logger.info("ADB 测试结果:\n" + r.toDiagnosticString());
+                    showResultDialog("ADB 测试", r.toDiagnosticString());
+                });
+            }).start();
+        }));
 
         // 主题
         contentArea.addView(makeSectionTitle("🎨 主题"));
@@ -937,6 +973,47 @@ public class MainActivity extends Activity {
     }
 
     // ═══════════════════════════════════════
+    //  ADB 自动授权
+    // ═══════════════════════════════════════
+
+    /**
+     * ADB 连接成功后，自动给 APP 授予权限
+     * 通过 adb shell pm grant 命令
+     */
+    private void autoGrantPermissions() {
+        new Thread(() -> {
+            Logger.info("正在自动授权...");
+            String packageName = getPackageName();
+
+            String[] permissions = {
+                "android.permission.READ_LOGS",
+                "android.permission.WRITE_SECURE_SETTINGS",
+                "android.permission.MANAGE_USERS",
+                "android.permission.DUMP",
+                "android.permission.PACKAGE_USAGE_STATS"
+            };
+
+            for (String perm : permissions) {
+                Sh.Result r = Sh.run("pm grant " + packageName + " " + perm);
+                if (r.ok()) {
+                    Logger.ok("已授权: " + perm);
+                } else {
+                    Logger.warn("授权失败: " + perm + " - " + (r.err != null ? r.err.trim() : ""));
+                }
+            }
+
+            // 验证权限
+            Logger.info("权限验证:");
+            Sh.Result check = Sh.run("dumpsys package " + packageName + " | grep -A5 'grantedPermissions'");
+            if (check.out != null && !check.out.isEmpty()) {
+                Logger.info(check.out);
+            }
+
+            Logger.ok("自动授权完成");
+        }).start();
+    }
+
+    // ═══════════════════════════════════════
     //  导出/导入
     // ═══════════════════════════════════════
 
@@ -946,12 +1023,24 @@ public class MainActivity extends Activity {
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
             sb.append("# C11 车控测试 日志导出\n");
             sb.append("# 时间: ").append(sdf.format(new Date())).append("\n");
-            sb.append("# ADB: ").append(adbCustom ? adbHost + ":" + adbPort : "本地").append("\n\n");
+            sb.append("# ADB: ").append(Sh.isAdbConnected() ? "ADB shell (uid=2000)" : "本地 (应用uid)").append("\n\n");
             sb.append(logView.getText().toString());
 
             String filename = "c11_log_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date()) + ".txt";
-            boolean ok = Sh.writeFile("/sdcard/" + filename, sb.toString());
-            Logger.ok(ok ? "日志已导出: /sdcard/" + filename : "导出失败");
+            // 优先用 Java FileWriter 写 APP 私有目录，避免存储权限问题
+            try {
+                java.io.File dir = new java.io.File(getExternalFilesDir(null), "logs");
+                if (!dir.exists()) dir.mkdirs();
+                java.io.File f = new java.io.File(dir, filename);
+                java.io.FileWriter fw = new java.io.FileWriter(f);
+                fw.write(sb.toString());
+                fw.close();
+                Logger.ok("日志已导出: " + f.getAbsolutePath());
+            } catch (Exception e) {
+                // fallback: 用 shell 写
+                boolean ok = Sh.writeFile("/sdcard/" + filename, sb.toString());
+                Logger.ok(ok ? "日志已导出: /sdcard/" + filename : "导出失败: " + e.getMessage());
+            }
         }).start();
     }
 
