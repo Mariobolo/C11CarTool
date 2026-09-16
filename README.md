@@ -2,6 +2,32 @@
 
 零跑 C11 车辆控制功能测试工具，直接安装在车机或手机上使用。
 
+## 版本
+
+**当前版本: v0.2.20260916 (测试版)**
+
+### v0.2.20260916 更新内容
+
+- **重构 Sh.java**: 所有命令返回完整 exit code/stdout/stderr，默认 10 秒超时，独立线程读取输出防死锁
+- **重构 Logger.java**: 8 级日志（DEBUG/INFO/OK/WARN/ERROR/STEP/TITLE/CMD），时间戳+标签，1000 条上限防溢出
+- **移除假 ADB 连接检测**: 之前"连接对号"只是检查本地 `id` 命令，现已改为显示真实权限等级（APP/SHELL/ROOT）和设备信息
+- **新增诊断模式**: 一键运行 8 项诊断（基本信息/零跑属性/设置读取/车辆设置/广播测试/logcat测试/网络状态/权限总结），自动保存报告
+- **修复车辆状态读取**: 读取失败显示红色"读取失败"而非模糊的"--"，超时显示橙色"超时"
+- **新增 CrashHandler**: 全局异常捕获，崩溃时自动保存完整日志到 `/sdcard/c11_crash_logs/`
+- **版本号改为 0.2.日期戳格式**
+
+### 已知限制（普通应用权限）
+
+| 操作 | 普通应用 | 说明 |
+|------|---------|------|
+| getprop | ✅ 大部分可读 | |
+| settings get | ✅ 大部分可读 | |
+| settings put | ❌ 需 WRITE_SECURE_SETTINGS | |
+| am broadcast | ⚠️ 可执行，接收方可能拒绝 | 需实车诊断确认 |
+| logcat | ❌ 只能看自己的日志 | Android 4.1+ 限制 |
+
+**首次使用请运行"诊断模式"确认实际权限能力。**
+
 ## 功能
 
 - **227 个参数**, **23 个 Tab**
@@ -13,20 +39,20 @@
 - **双日志**: 应用日志 + 车辆日志
 - **搜索**: 按名称/key 模糊搜索参数
 - **批量读取**: 一键读取当前 Tab 所有参数
+- **诊断模式**: 一键检查权限/命令/广播/logcat 能力
+- **全局异常捕获**: 崩溃日志自动保存
 
 ## 构建
 
 ### 方式 1: Android Studio (推荐)
 
-1. 用 Android Studio 打开 `android_app/` 目录
+1. 用 Android Studio 打开项目根目录
 2. 等待 Gradle 同步完成
 3. Build → Build APK
 
 ### 方式 2: 命令行
 
 ```bash
-cd android_app
-
 # 需要: JDK 17+, Android SDK (API 28, Build Tools 28.0.3)
 # 设置 local.properties:
 #   sdk.dir=/path/to/Android/Sdk
@@ -37,7 +63,6 @@ cd android_app
 ### 方式 3: build.sh
 
 ```bash
-cd android_app
 bash build.sh
 ```
 
@@ -47,7 +72,7 @@ bash build.sh
 # 安装
 adb install -r -t app/build/outputs/apk/debug/app-debug.apk
 
-# 授权 (获取系统设置写入权限)
+# 授权 (获取系统设置写入权限 - 需要 shell 权限)
 adb shell pm grant com.c11.cartool android.permission.WRITE_SECURE_SETTINGS
 ```
 
@@ -105,6 +130,8 @@ adb shell pm grant com.c11.cartool android.permission.WRITE_SECURE_SETTINGS
 ## 注意事项
 
 1. 车机 Android 9 (API 28)，不要使用 AndroidX
-2. 部分功能需要 `WRITE_SECURE_SETTINGS` 权限
+2. 部分功能需要 `WRITE_SECURE_SETTINGS` 权限（普通应用无此权限）
 3. 广播控制依赖车机 ROM，不同版本可能有差异
 4. 建议加入电池优化白名单保持后台运行
+5. 普通应用无法读取系统 logcat，只能读取 APP 自己的日志
+6. 首次使用请运行"诊断模式"确认实际权限能力

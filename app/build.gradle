@@ -10,8 +10,8 @@ android {
         applicationId "com.c11.cartool"
         minSdk 28
         targetSdk 28
-        versionCode 1
-        versionName "2.0"
+        versionCode 2
+        versionName "0.2.20260916"
     }
 
     buildTypes {

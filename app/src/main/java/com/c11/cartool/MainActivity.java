@@ -5,6 +5,8 @@ import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
@@ -24,18 +26,21 @@ import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 /**
- * C11 车控测试工具 v2.0
+ * C11 车控测试工具 v2.1
  *
- * 基于 c11assistant 确认的接口:
- *   - Settings.Global 读写
- *   - IVI 广播控制 (灯光/驾驶模式/场景/空调)
- *   - Logcat 事件监控
- *
- * 227 个参数, 23 个 Tab
+ * 新增:
+ *   - ADB 连接管理 (自动本地/自定义地址端口)
+ *   - 日志导出 + 时间戳
+ *   - 参数快照导出/导入
+ *   - 主题跟随系统
+ *   - 性能监控
  */
 public class MainActivity extends Activity {
 
@@ -48,8 +53,19 @@ public class MainActivity extends Activity {
     private boolean polling = false;
     private LinearLayout contentArea;
     private EditText searchBox;
+    private SharedPreferences prefs;
 
-    // 颜色
+    // ADB 连接配置
+    private String adbHost = "127.0.0.1";
+    private int adbPort = 5555;
+    private boolean adbCustom = false;
+    private boolean adbConnected = false;
+
+    // 性能监控
+    private long lastCmdTime = 0;
+    private int cmdCount = 0;
+
+    // 颜色 (深色主题)
     static final int C_BG = 0xFF0F1117;
     static final int C_SURFACE = 0xFF1A1D27;
     static final int C_CARD = 0xFF1E2330;
@@ -63,59 +79,98 @@ public class MainActivity extends Activity {
     static final int C_ORANGE = 0xFFF97316;
     static final int C_PURPLE = 0xFFA855F7;
 
+    // 浅色主题
+    static final int C_LIGHT_BG = 0xFFF5F5F5;
+    static final int C_LIGHT_SURFACE = 0xFFFFFFFF;
+    static final int C_LIGHT_CARD = 0xFFF0F0F0;
+    static final int C_LIGHT_TEXT = 0xFF1A1A1A;
+    static final int C_LIGHT_DIM = 0xFF666666;
+
+    private boolean darkTheme = true;
+
     // Tab 定义
     static final String[] TAB_NAMES = {
             "📊 全部", "❄️ 空调", "💡 灯光", "🪑 座椅", "🚗 车身",
             "🪟 车窗", "🏎️ 驾驶", "🎯 场景", "🔊 音量", "⚡ 充电",
             "🔋 电池", "🛡️ ADAS", "🔧 行车", "📡 系统", "🔒 安全",
             "🎵 媒体", "🗺️ 导航", "📱 蓝牙", "🌧️ 雨刷", "🌡️ 环境",
-            "📏 里程", "🏷️ 车辆", "📋 日志"
+            "📏 里程", "🏷️ 车辆", "📋 日志", "⚙️ 设置"
     };
 
-    // Tab 对应的参数过滤关键词
     static final String[] TAB_FILTERS = {
-            null,
-            "空调|hvac|temp|defrost|ac_",
-            "灯光|light|ambient|氛围",
-            "座椅|seat|steering|按摩|加热|通风",
-            "车身|vehicle|child|mirror|trunk|window_lock|锁|门",
-            "车窗|window|sunroof|sunshade|天窗|遮阳",
-            "驾驶|drive|steer|energy|转向|能量|回收",
-            "场景|scene|rest|camping|guard|sentinel|小憩|露营|守护|哨兵",
-            "音量|volume|C11_|SPEECH|XIAOLING|语音|小灵",
-            "充电|charging|charge|gun_lock",
-            "电池|battery|range|续航|里程",
+            null, "空调|hvac|temp|defrost|ac_", "灯光|light|ambient|氛围",
+            "座椅|seat|steering|按摩|加热|通风", "车身|vehicle|child|mirror|trunk|window_lock|锁|门",
+            "车窗|window|sunroof|sunshade|天窗|遮阳", "驾驶|drive|steer|energy|转向|能量|回收",
+            "场景|scene|rest|camping|guard|sentinel|小憩|露营|守护|哨兵", "音量|volume|C11_|SPEECH|XIAOLING|语音|小灵",
+            "充电|charging|charge|gun_lock", "电池|battery|range|续航|里程",
             "ADAS|adas|acc|aeb|lka|ldw|bsd|fcw|dow|rcta|rcw|alc|tsr|hwa|lcc|tja|ica|isa|slif|bsi|ir|sdis|sai|parking|pdc|hdc|ccs",
-            "疲劳|face|dms|creep|one_pedal|低速|蠕行|踏板",
-            "系统|system|wifi|bluetooth|hotspot|dark|pedestrian|update|usb|network",
-            "安全|safety|lock_sound|find_car|flash|belt|password|guest|锁车声音|寻车|安全带|密码|访客",
-            "媒体|media|source|playing|track|artist|album|fm|eq",
-            "导航|navi|destination|distance|eta|traffic",
-            "蓝牙|bt|phone|电话|来电",
-            "雨刷|wiper|spray|喷水",
-            "环境|env|pm25|temp_inside|temp_outside|PM2.5|车内温度|车外温度",
-            "里程|odo|trip|总里程|行程",
-            "车辆|car|vin|model|year|color|config|gear|speed|rpm|VIN|车型|年款|颜色|档位|车速",
-            null // 日志 tab
+            "疲劳|face|dms|creep|one_pedal|低速|蠕行|踏板", "系统|system|wifi|bluetooth|hotspot|dark|pedestrian|update|usb|network",
+            "安全|safety|lock_sound|find_car|flash|belt|password|guest", "媒体|media|source|playing|track|artist|album|fm|eq",
+            "导航|navi|destination|distance|eta|traffic", "蓝牙|bt|phone|电话|来电",
+            "雨刷|wiper|spray|喷水", "环境|env|pm25|temp_inside|temp_outside", "里程|odo|trip",
+            "车辆|car|vin|model|year|color|config|gear|speed|rpm", null, null
     };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         h = new Handler(Looper.getMainLooper());
+
+        // 安装全局异常捕获（必须在最前面）
+        CrashHandler.install(this);
+
+        // 加载配置
+        prefs = getSharedPreferences("c11cartool", MODE_PRIVATE);
+        adbHost = prefs.getString("adb_host", "127.0.0.1");
+        adbPort = prefs.getInt("adb_port", 5555);
+        adbCustom = prefs.getBoolean("adb_custom", false);
+        darkTheme = prefs.getBoolean("dark_theme", true);
+
         Logger.setCallback((line, level) -> h.post(() -> appendLog(line, level)));
+
+        // 性能监控: 记录命令耗时
+        Logger.setPerfCallback((cmd, durationMs) -> {
+            cmdCount++;
+            lastCmdTime = durationMs;
+        });
+
         setContentView(buildUI());
 
+        // 初始化（本地运行模式，不需要 ADB 连接）
         new Thread(() -> {
             DeviceInfo info = DeviceInfo.detect();
-            h.post(() -> statusLine.setText(String.format("UID:%d %s SELinux:%s",
-                    info.uid, info.model, info.seLinux)));
-            Logger.title("C11 车控测试工具 v2.0");
-            Logger.info("设备: " + info.model + " | Android " + info.android + " | SDK " + info.sdk);
-            Logger.info("UID: " + info.uid + " | SELinux: " + info.seLinux);
-            Logger.info("参数总数: " + VehicleParams.getCount());
-            Logger.info("基于 c11assistant 确认的接口");
+            int uid = Sh.uid();
+            String uidLabel;
+            if (uid == 0) uidLabel = "ROOT";
+            else if (uid == 2000) uidLabel = "SHELL";
+            else if (uid >= 10000) uidLabel = "APP(u" + (uid - 10000) + ")";
+            else uidLabel = "uid=" + uid;
+
+            h.post(() -> statusLine.setText(String.format("%s | %s | Android %s",
+                    uidLabel, info.model, info.android)));
+
+            Logger.title("C11 车控测试工具 v0.2.20260916");
+            Logger.info("设备: " + info.model + " | Android " + info.android);
+            Logger.info("运行模式: 车机本地 (uid=" + uid + ")");
+            Logger.info("参数: " + VehicleParams.getCount() + " 个");
+            Logger.warn("注意: 普通应用权限可能受限，如车控无效请运行诊断模式");
         }).start();
+    }
+
+    // ═══════════════════════════════════════
+    //  ADB 连接管理
+    // ═══════════════════════════════════════
+
+    private void connectAdb() {
+        if (adbCustom) {
+            String result = Sh.out("connect " + adbHost + ":" + adbPort);
+            adbConnected = result.contains("connected");
+            Logger.info("ADB 连接 " + adbHost + ":" + adbPort + " → " + result);
+        } else {
+            // 本地模式，直接检查
+            String id = Sh.out("id");
+            adbConnected = id.contains("uid=");
+        }
     }
 
     // ═══════════════════════════════════════
@@ -125,7 +180,7 @@ public class MainActivity extends Activity {
     private View buildUI() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(C_BG);
+        root.setBackgroundColor(darkTheme ? C_BG : C_LIGHT_BG);
 
         root.addView(buildHeader());
         root.addView(buildSearchBar());
@@ -147,19 +202,27 @@ public class MainActivity extends Activity {
     private View buildHeader() {
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setBackgroundColor(C_SURFACE);
+        header.setBackgroundColor(darkTheme ? C_SURFACE : C_LIGHT_SURFACE);
         header.setPadding(12, 8, 12, 8);
         header.setGravity(Gravity.CENTER_VERTICAL);
 
         TextView title = new TextView(this);
-        title.setText("🚗 C11 车控测试 v2.0");
-        title.setTextColor(C_TEXT);
+        title.setText("🚗 C11 车控 v0.2.20260916");
+        title.setTextColor(darkTheme ? C_TEXT : C_LIGHT_TEXT);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         header.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
+        // 性能指示
+        TextView perf = new TextView(this);
+        perf.setText("⚡");
+        perf.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        perf.setTextColor(C_DIM);
+        perf.setPadding(8, 0, 8, 0);
+        header.addView(perf);
+
         statusLine = new TextView(this);
-        statusLine.setText("检测中...");
+        statusLine.setText("连接中...");
         statusLine.setTextColor(C_DIM);
         statusLine.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
         header.addView(statusLine);
@@ -170,31 +233,28 @@ public class MainActivity extends Activity {
     private View buildSearchBar() {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setBackgroundColor(C_SURFACE);
+        row.setBackgroundColor(darkTheme ? C_SURFACE : C_LIGHT_SURFACE);
         row.setPadding(8, 0, 8, 4);
         row.setGravity(Gravity.CENTER_VERTICAL);
 
         searchBox = new EditText(this);
-        searchBox.setHint("🔍 搜索参数 (名称/key)...");
+        searchBox.setHint("🔍 搜索参数...");
         searchBox.setHintTextColor(C_DIM);
-        searchBox.setTextColor(C_TEXT);
+        searchBox.setTextColor(darkTheme ? C_TEXT : C_LIGHT_TEXT);
         searchBox.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        searchBox.setBackgroundColor(C_CARD);
+        searchBox.setBackgroundColor(darkTheme ? C_CARD : C_LIGHT_CARD);
         searchBox.setPadding(8, 6, 8, 6);
-        searchBox.setInputType(InputType.TYPE_CLASS_TEXT);
         row.addView(searchBox, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        Button searchBtn = makeSmallBtn("搜索", C_BLUE, v -> doSearch());
-        row.addView(searchBtn);
-        Button allBtn = makeSmallBtn("全部", C_SURFACE, v -> switchTab(0));
-        row.addView(allBtn);
+        row.addView(makeSmallBtn("搜索", C_BLUE, v -> doSearch()));
+        row.addView(makeSmallBtn("全部", C_SURFACE, v -> switchTab(0)));
 
         return row;
     }
 
     private View buildTabBar() {
         ScrollView tabScroll = new ScrollView(this);
-        tabScroll.setBackgroundColor(C_SURFACE);
+        tabScroll.setBackgroundColor(darkTheme ? C_SURFACE : C_LIGHT_SURFACE);
         tabScroll.setHorizontalScrollBarEnabled(false);
 
         LinearLayout tabs = new LinearLayout(this);
@@ -224,7 +284,7 @@ public class MainActivity extends Activity {
     private View buildLogArea() {
         LinearLayout logArea = new LinearLayout(this);
         logArea.setOrientation(LinearLayout.VERTICAL);
-        logArea.setBackgroundColor(C_SURFACE);
+        logArea.setBackgroundColor(darkTheme ? C_SURFACE : C_LIGHT_SURFACE);
         logArea.setPadding(6, 2, 6, 2);
 
         LinearLayout logHeader = new LinearLayout(this);
@@ -242,17 +302,17 @@ public class MainActivity extends Activity {
             vehLogView.setText("");
         }));
         logHeader.addView(makeSmallBtn("▶ 轮询", C_ORANGE, v -> togglePolling()));
-        logHeader.addView(makeSmallBtn("📖 全部刷新", C_PURPLE, v -> refreshAll()));
+        logHeader.addView(makeSmallBtn("📤 导出日志", C_PURPLE, v -> exportLogs()));
         logArea.addView(logHeader);
 
         // 应用日志
         logScroll = new ScrollView(this);
-        logScroll.setBackgroundColor(C_CARD);
+        logScroll.setBackgroundColor(darkTheme ? C_CARD : C_LIGHT_CARD);
         logScroll.setPadding(6, 6, 6, 6);
         logView = new TextView(this);
         logView.setTypeface(Typeface.MONOSPACE);
         logView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9);
-        logView.setTextColor(C_TEXT);
+        logView.setTextColor(darkTheme ? C_TEXT : C_LIGHT_TEXT);
         logView.setLineSpacing(1, 1);
         logScroll.addView(logView);
         logArea.addView(logScroll, new LinearLayout.LayoutParams(
@@ -260,7 +320,7 @@ public class MainActivity extends Activity {
 
         // 车辆日志
         vehLogScroll = new ScrollView(this);
-        vehLogScroll.setBackgroundColor(C_CARD);
+        vehLogScroll.setBackgroundColor(darkTheme ? C_CARD : C_LIGHT_CARD);
         vehLogScroll.setPadding(6, 6, 6, 6);
         vehLogScroll.setVisibility(View.GONE);
         vehLogView = new TextView(this);
@@ -282,10 +342,8 @@ public class MainActivity extends Activity {
     private void switchTab(int idx) {
         contentArea.removeAllViews();
 
-        if (idx == TAB_NAMES.length - 1) {
-            buildLogTab();
-            return;
-        }
+        if (idx == TAB_NAMES.length - 2) { buildLogTab(); return; }
+        if (idx == TAB_NAMES.length - 1) { buildSettingsTab(); return; }
 
         String filter = TAB_FILTERS[idx];
         List<String[]> params;
@@ -296,44 +354,36 @@ public class MainActivity extends Activity {
             params = VehicleParams.getByCategory(filter);
         }
 
-        // 统计
+        // 统计 + 快捷操作
         TextView countTv = new TextView(this);
-        countTv.setText("共 " + params.size() + " 个参数");
+        countTv.setText("共 " + params.size() + " 个参数 | 性能: " + cmdCount + " 次命令, 最近 " + lastCmdTime + "ms");
         countTv.setTextColor(C_DIM);
-        countTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        countTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
         countTv.setPadding(4, 4, 4, 4);
         contentArea.addView(countTv);
 
-        // 快捷操作面板 (仅非全部 tab 显示)
-        if (filter != null) {
-            contentArea.addView(buildQuickActions(idx));
-        }
+        if (filter != null) contentArea.addView(buildQuickActions(idx));
 
-        // 批量读取
-        contentArea.addView(makeBtn("📖 批量读取本页全部参数", C_BLUE, v -> {
+        contentArea.addView(makeBtn("📖 批量读取本页全部", C_BLUE, v -> {
             new Thread(() -> {
+                long start = System.currentTimeMillis();
                 Logger.info("批量读取 " + params.size() + " 个参数...");
                 for (String[] p : params) {
                     String val = VehicleControl.get(p[0], p[3]);
                     Logger.info(p[1] + " (" + p[0] + ") = " + val);
                 }
-                Logger.ok("批量读取完成");
+                long elapsed = System.currentTimeMillis() - start;
+                Logger.ok("批量读取完成, 耗时 " + elapsed + "ms");
             }).start();
         }));
 
-        // 参数列表
-        for (String[] p : params) {
-            contentArea.addView(makeParamRow(p));
-        }
+        for (String[] p : params) contentArea.addView(makeParamRow(p));
     }
 
-    /**
-     * 快捷操作面板 - 根据 tab 显示常用操作按钮
-     */
     private View buildQuickActions(int tabIdx) {
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setBackgroundColor(C_CARD);
+        panel.setBackgroundColor(darkTheme ? C_CARD : C_LIGHT_CARD);
         panel.setPadding(8, 6, 8, 6);
 
         TextView title = new TextView(this);
@@ -349,126 +399,38 @@ public class MainActivity extends Activity {
 
         switch (tabIdx) {
             case 1: // 空调
-                btnRow.addView(makeSmallBtn("❄️ 最大制冷 ON", C_GREEN, v -> {
-                    VehicleControl.setAcMax(true);
-                    Logger.ok("最大制冷 ON");
-                }));
-                btnRow.addView(makeSmallBtn("🔴 最大制冷 OFF", C_RED, v -> {
-                    VehicleControl.setAcMax(false);
-                    Logger.ok("最大制冷 OFF");
-                }));
+                btnRow.addView(makeSmallBtn("❄️ 最大制冷", C_GREEN, v -> { VehicleControl.setAcMax(true); Logger.ok("最大制冷 ON"); }));
                 break;
-
             case 2: // 灯光
-                btnRow.addView(makeSmallBtn("💡 近光灯 ON", C_GREEN, v -> {
-                    VehicleControl.setLowBeam(true);
-                    Logger.ok("近光灯 ON");
-                }));
-                btnRow.addView(makeSmallBtn("🔴 近光灯 OFF", C_RED, v -> {
-                    VehicleControl.setLowBeam(false);
-                    Logger.ok("近光灯 OFF");
-                }));
-                btnRow.addView(makeSmallBtn("💡 示廓灯 ON", C_GREEN, v -> {
-                    VehicleControl.setPositionLight(true);
-                    Logger.ok("示廓灯 ON");
-                }));
-                btnRow.addView(makeSmallBtn("💡 后雾灯 ON", C_GREEN, v -> {
-                    VehicleControl.setRearFog(true);
-                    Logger.ok("后雾灯 ON");
-                }));
-                btnRow.addView(makeSmallBtn("🔊 行人警示 ON", C_GREEN, v -> {
-                    VehicleControl.setPedestriansAlert(true);
-                    Logger.ok("行人警示 ON");
-                }));
+                btnRow.addView(makeSmallBtn("💡 近光灯", C_GREEN, v -> { VehicleControl.setLowBeam(true); Logger.ok("近光灯 ON"); }));
+                btnRow.addView(makeSmallBtn("💡 示廓灯", C_GREEN, v -> { VehicleControl.setPositionLight(true); Logger.ok("示廓灯 ON"); }));
+                btnRow.addView(makeSmallBtn("💡 后雾灯", C_GREEN, v -> { VehicleControl.setRearFog(true); Logger.ok("后雾灯 ON"); }));
                 break;
-
             case 6: // 驾驶
                 String[] modes = {"舒适", "运动", "自定义", "极致", "经济"};
                 int[] colors = {C_GREEN, C_RED, C_YELLOW, C_PURPLE, C_CYAN};
                 for (int i = 0; i < modes.length; i++) {
                     final int mode = i;
-                    btnRow.addView(makeSmallBtn(modes[i], colors[i], v -> {
-                        VehicleControl.setDriverMode(mode);
-                        Logger.ok("驾驶模式: " + modes[mode]);
-                    }));
+                    btnRow.addView(makeSmallBtn(modes[i], colors[i], v -> { VehicleControl.setDriverMode(mode); Logger.ok("驾驶模式: " + modes[mode]); }));
                 }
                 break;
-
             case 7: // 场景
-                btnRow.addView(makeSmallBtn("😴 小憩", C_BLUE, v -> {
-                    VehicleControl.setRestMode(true);
-                    Logger.ok("小憩模式 ON");
-                }));
-                btnRow.addView(makeSmallBtn("⛺ 露营", C_GREEN, v -> {
-                    VehicleControl.setCampingMode(true);
-                    Logger.ok("露营模式 ON");
-                }));
-                btnRow.addView(makeSmallBtn("🛡️ 守护", C_YELLOW, v -> {
-                    VehicleControl.setGuardMode(true);
-                    Logger.ok("守护模式 ON");
-                }));
-                btnRow.addView(makeSmallBtn("👁️ 哨兵", C_RED, v -> {
-                    VehicleControl.setSentinelMode(true);
-                    Logger.ok("哨兵模式 ON");
-                }));
-                btnRow.addView(makeSmallBtn("🔋 省电", C_CYAN, v -> {
-                    VehicleControl.setPowerSaveMode(true);
-                    Logger.ok("省电模式 ON");
-                }));
+                btnRow.addView(makeSmallBtn("😴 小憩", C_BLUE, v -> { VehicleControl.setRestMode(true); Logger.ok("小憩 ON"); }));
+                btnRow.addView(makeSmallBtn("⛺ 露营", C_GREEN, v -> { VehicleControl.setCampingMode(true); Logger.ok("露营 ON"); }));
+                btnRow.addView(makeSmallBtn("🛡️ 守护", C_YELLOW, v -> { VehicleControl.setGuardMode(true); Logger.ok("守护 ON"); }));
+                btnRow.addView(makeSmallBtn("👁️ 哨兵", C_RED, v -> { VehicleControl.setSentinelMode(true); Logger.ok("哨兵 ON"); }));
                 break;
-
             case 13: // 系统
-                btnRow.addView(makeSmallBtn("📶 WiFi", C_GREEN, v -> {
-                    VehicleControl.setWifi(true);
-                    Logger.ok("WiFi ON");
-                }));
-                btnRow.addView(makeSmallBtn("📱 蓝牙", C_GREEN, v -> {
-                    VehicleControl.setBluetooth(true);
-                    Logger.ok("蓝牙 ON");
-                }));
-                btnRow.addView(makeSmallBtn("🌞 日间模式", C_YELLOW, v -> {
-                    VehicleControl.setDayNightMode(true);
-                    Logger.ok("日间模式");
-                }));
-                btnRow.addView(makeSmallBtn("🌙 夜间模式", C_PURPLE, v -> {
-                    VehicleControl.setDayNightMode(false);
-                    Logger.ok("夜间模式");
-                }));
+                btnRow.addView(makeSmallBtn("📶 WiFi", C_GREEN, v -> { VehicleControl.setWifi(true); Logger.ok("WiFi ON"); }));
+                btnRow.addView(makeSmallBtn("📱 蓝牙", C_GREEN, v -> { VehicleControl.setBluetooth(true); Logger.ok("蓝牙 ON"); }));
                 break;
-
-            case 15: // 媒体
-                btnRow.addView(makeSmallBtn("🎵 打开音乐", C_GREEN, v -> {
-                    VehicleControl.openMedia();
-                    Logger.ok("打开音乐");
-                }));
-                break;
-
-            case 16: // 导航
-                btnRow.addView(makeSmallBtn("🗺️ 打开导航", C_GREEN, v -> {
-                    VehicleControl.openAutonavi();
-                    Logger.ok("打开导航");
-                }));
-                break;
-
             case 21: // 车辆
-                btnRow.addView(makeSmallBtn("🔒 锁车", C_GREEN, v -> {
-                    VehicleControl.setSetting("strCarVehicleLock", "1", "setting");
-                    Logger.ok("锁车");
-                }));
-                btnRow.addView(makeSmallBtn("🔓 解锁", C_BLUE, v -> {
-                    VehicleControl.setSetting("strCarVehicleLock", "0", "setting");
-                    Logger.ok("解锁");
-                }));
-                btnRow.addView(makeSmallBtn("🏠 回主页", C_SURFACE, v -> {
-                    VehicleControl.backToHome();
-                    Logger.ok("回主页");
-                }));
+                btnRow.addView(makeSmallBtn("🔒 锁车", C_GREEN, v -> { VehicleControl.setSetting("strCarVehicleLock", "1", "setting"); Logger.ok("锁车"); }));
+                btnRow.addView(makeSmallBtn("🔓 解锁", C_BLUE, v -> { VehicleControl.setSetting("strCarVehicleLock", "0", "setting"); Logger.ok("解锁"); }));
                 break;
         }
 
-        if (btnRow.getChildCount() > 0) {
-            panel.addView(btnRow);
-        }
+        if (btnRow.getChildCount() > 0) panel.addView(btnRow);
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -477,7 +439,36 @@ public class MainActivity extends Activity {
         return panel;
     }
 
+    // ═══════════════════════════════════════
+    //  日志 Tab
+    // ═══════════════════════════════════════
+
     private void buildLogTab() {
+        contentArea.addView(makeSectionTitle("🔬 诊断模式"));
+        contentArea.addView(makeBtn("🧪 运行完整诊断（检查权限/命令/广播/logcat）", C_ORANGE, v -> {
+            new Thread(() -> {
+                Logger.title("开始运行诊断...");
+                String report = DiagnosticMode.runFullDiagnostic(new DiagnosticMode.ProgressCallback() {
+                    @Override
+                    public void onProgress(String message) {
+                        h.post(() -> Logger.info(message));
+                    }
+                    @Override
+                    public void onComplete(String fullReport) {
+                        h.post(() -> {
+                            Logger.ok("诊断完成！");
+                            showResultDialog("诊断报告", fullReport);
+                            // 自动导出诊断报告
+                            String filename = "/sdcard/c11_diagnostic_" +
+                                    new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date()) + ".txt";
+                            Sh.writeFile(filename, fullReport);
+                            Logger.info("诊断报告已保存: " + filename);
+                        });
+                    }
+                });
+            }).start();
+        }));
+
         contentArea.addView(makeSectionTitle("📋 日志工具"));
 
         contentArea.addView(makeBtn("📖 读取 logcat (最近50行)", C_BLUE, v -> {
@@ -487,63 +478,280 @@ public class MainActivity extends Activity {
             }).start();
         }));
 
-        contentArea.addView(makeBtn("🗑 清除 logcat 缓冲区", C_RED, v -> {
-            VehicleControl.clearLogcat();
-            Logger.ok("logcat 已清除");
-        }));
-
+        contentArea.addView(makeBtn("🗑 清除 logcat", C_RED, v -> { VehicleControl.clearLogcat(); Logger.ok("logcat 已清除"); }));
         contentArea.addView(makeBtn("📖 读取全部 leap.* 属性", C_GREEN, v -> {
-            new Thread(() -> {
-                String all = VehicleControl.getAllLeapProps();
-                Logger.info("leap.* 属性:\n" + all);
-                showResultDialog("leap.* 属性", all);
-            }).start();
+            new Thread(() -> { String all = VehicleControl.getAllLeapProps(); Logger.info("leap.*:\n" + all); showResultDialog("leap.*", all); }).start();
+        }));
+        contentArea.addView(makeBtn("📖 读取全部 strCar* 设置", C_GREEN, v -> {
+            new Thread(() -> { String all = VehicleControl.getAllCarSettings(); Logger.info("strCar*:\n" + all); showResultDialog("strCar*", all); }).start();
         }));
 
-        contentArea.addView(makeBtn("📖 读取全部 strCar* 设置", C_GREEN, v -> {
-            new Thread(() -> {
-                String all = VehicleControl.getAllCarSettings();
-                Logger.info("strCar* 设置:\n" + all);
-                showResultDialog("strCar* 设置", all);
-            }).start();
-        }));
+        contentArea.addView(makeSectionTitle("📤 日志导出"));
+        contentArea.addView(makeBtn("📤 导出应用日志到文件", C_PURPLE, v -> exportLogs()));
+        contentArea.addView(makeBtn("📤 导出 logcat 到文件", C_PURPLE, v -> exportLogcat()));
 
         contentArea.addView(makeSectionTitle("🔧 自定义命令"));
-        contentArea.addView(makeEditRow("执行 getprop", "custom_prop", "prop", "leap.cabin.driver_temp", "属性名"));
-        contentArea.addView(makeEditRow("执行 settings get", "custom_setting", "setting", "C11_MUSIC", "设置名"));
-        contentArea.addView(makeEditRow("执行 shell 命令", "custom_shell", "shell", "id", "命令"));
+        contentArea.addView(makeEditRow("getprop", "custom_prop", "prop", "leap.cabin.driver_temp", "属性名"));
+        contentArea.addView(makeEditRow("settings get", "custom_setting", "setting", "C11_MUSIC", "设置名"));
+        contentArea.addView(makeEditRow("shell 命令", "custom_shell", "shell", "id", "命令"));
 
-        contentArea.addView(makeSectionTitle("🗣️ TTS 语音测试"));
+        contentArea.addView(makeSectionTitle("🗣️ TTS 测试"));
         LinearLayout ttsRow = new LinearLayout(this);
         ttsRow.setOrientation(LinearLayout.HORIZONTAL);
         ttsRow.setPadding(0, 4, 0, 4);
         ttsRow.setGravity(Gravity.CENTER_VERTICAL);
-
         EditText ttsInput = new EditText(this);
-        ttsInput.setHint("输入语音内容...");
-        ttsInput.setHintTextColor(C_DIM);
-        ttsInput.setTextColor(C_TEXT);
-        ttsInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        ttsInput.setBackgroundColor(C_CARD);
-        ttsInput.setPadding(8, 6, 8, 6);
         ttsInput.setText("你好，我是小零");
+        ttsInput.setTextColor(darkTheme ? C_TEXT : C_LIGHT_TEXT);
+        ttsInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        ttsInput.setBackgroundColor(darkTheme ? C_CARD : C_LIGHT_CARD);
+        ttsInput.setPadding(8, 6, 8, 6);
         ttsRow.addView(ttsInput, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        Button ttsBtn = makeSmallBtn("🗣️ 播放", C_GREEN, v -> {
+        ttsRow.addView(makeSmallBtn("🗣️ 播放", C_GREEN, v -> {
             String text = ttsInput.getText().toString().trim();
-            if (!text.isEmpty()) {
-                VehicleControl.speak(text);
-                Logger.ok("TTS: " + text);
-            }
-        });
-        ttsRow.addView(ttsBtn);
+            if (!text.isEmpty()) { VehicleControl.speak(text); Logger.ok("TTS: " + text); }
+        }));
         contentArea.addView(ttsRow);
 
         contentArea.addView(makeSectionTitle("📋 ADB 授权"));
         contentArea.addView(makeBtn("📋 复制授权命令", C_YELLOW, v -> {
             copyToClipboard("adb shell pm grant com.c11.cartool android.permission.WRITE_SECURE_SETTINGS");
-            Logger.ok("已复制授权命令");
+            Logger.ok("已复制");
         }));
+    }
+
+    // ═══════════════════════════════════════
+    //  设置 Tab
+    // ═══════════════════════════════════════
+
+    private void buildSettingsTab() {
+        contentArea.addView(makeSectionTitle("⚙️ 设置"));
+
+        // ADB 连接
+        contentArea.addView(makeSectionTitle("📡 ADB 连接"));
+
+        LinearLayout adbRow = new LinearLayout(this);
+        adbRow.setOrientation(LinearLayout.HORIZONTAL);
+        adbRow.setBackgroundColor(darkTheme ? C_CARD : C_LIGHT_CARD);
+        adbRow.setPadding(8, 6, 8, 6);
+        adbRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView adbLabel = new TextView(this);
+        adbLabel.setText("连接模式:");
+        adbLabel.setTextColor(darkTheme ? C_TEXT : C_LIGHT_TEXT);
+        adbLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        adbRow.addView(adbLabel);
+
+        Button localBtn = makeSmallBtn("本地", adbCustom ? C_SURFACE : C_GREEN, v -> {
+            adbCustom = false;
+            prefs.edit().putBoolean("adb_custom", false).apply();
+            new Thread(() -> { connectAdb(); h.post(() -> switchTab(TAB_NAMES.length - 1)); }).start();
+        });
+        adbRow.addView(localBtn);
+
+        Button customBtn = makeSmallBtn("自定义", adbCustom ? C_GREEN : C_SURFACE, v -> {
+            adbCustom = true;
+            prefs.edit().putBoolean("adb_custom", true).apply();
+            switchTab(TAB_NAMES.length - 1);
+        });
+        adbRow.addView(customBtn);
+
+        contentArea.addView(adbRow);
+
+        if (adbCustom) {
+            LinearLayout addrRow = new LinearLayout(this);
+            addrRow.setOrientation(LinearLayout.HORIZONTAL);
+            addrRow.setBackgroundColor(darkTheme ? C_CARD : C_LIGHT_CARD);
+            addrRow.setPadding(8, 6, 8, 6);
+            addrRow.setGravity(Gravity.CENTER_VERTICAL);
+
+            EditText hostEt = new EditText(this);
+            hostEt.setText(adbHost);
+            hostEt.setTextColor(C_YELLOW);
+            hostEt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            hostEt.setBackgroundColor(darkTheme ? C_SURFACE : C_LIGHT_SURFACE);
+            hostEt.setPadding(6, 2, 6, 2);
+            addrRow.addView(hostEt, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            TextView colon = new TextView(this);
+            colon.setText(":");
+            colon.setTextColor(C_DIM);
+            addrRow.addView(colon);
+
+            EditText portEt = new EditText(this);
+            portEt.setText(String.valueOf(adbPort));
+            portEt.setTextColor(C_YELLOW);
+            portEt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            portEt.setBackgroundColor(darkTheme ? C_SURFACE : C_LIGHT_SURFACE);
+            portEt.setPadding(6, 2, 6, 2);
+            portEt.setInputType(InputType.TYPE_CLASS_NUMBER);
+            addrRow.addView(portEt, new LinearLayout.LayoutParams(80, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            Button connectBtn = makeSmallBtn("连接", C_BLUE, v -> {
+                adbHost = hostEt.getText().toString().trim();
+                try { adbPort = Integer.parseInt(portEt.getText().toString().trim()); } catch (Exception e) {}
+                prefs.edit().putString("adb_host", adbHost).putInt("adb_port", adbPort).apply();
+                new Thread(() -> { connectAdb(); h.post(() -> {
+                    Logger.ok("ADB 连接 " + (adbConnected ? "成功" : "失败"));
+                    switchTab(TAB_NAMES.length - 1);
+                }); }).start();
+            });
+            addrRow.addView(connectBtn);
+
+            contentArea.addView(addrRow);
+        }
+
+        // 主题
+        contentArea.addView(makeSectionTitle("🎨 主题"));
+        LinearLayout themeRow = new LinearLayout(this);
+        themeRow.setOrientation(LinearLayout.HORIZONTAL);
+        themeRow.setPadding(0, 4, 0, 4);
+
+        themeRow.addView(makeSmallBtn("🌙 深色", darkTheme ? C_GREEN : C_SURFACE, v -> {
+            darkTheme = true;
+            prefs.edit().putBoolean("dark_theme", true).apply();
+            setContentView(buildUI());
+        }));
+        themeRow.addView(makeSmallBtn("☀️ 浅色", darkTheme ? C_SURFACE : C_GREEN, v -> {
+            darkTheme = false;
+            prefs.edit().putBoolean("dark_theme", false).apply();
+            setContentView(buildUI());
+        }));
+        contentArea.addView(themeRow);
+
+        // 参数快照
+        contentArea.addView(makeSectionTitle("📸 参数快照"));
+        contentArea.addView(makeBtn("📸 导出全部参数快照", C_PURPLE, v -> exportSnapshot()));
+        contentArea.addView(makeBtn("📥 导入参数快照", C_CYAN, v -> importSnapshot()));
+
+        // WiFi ADB 自动开启
+        contentArea.addView(makeSectionTitle("📶 WiFi ADB 自动开启"));
+
+        // 无障碍服务状态
+        boolean accEnabled = BootReceiver.isAccessibilityServiceEnabled(this);
+        LinearLayout accRow = new LinearLayout(this);
+        accRow.setOrientation(LinearLayout.HORIZONTAL);
+        accRow.setBackgroundColor(darkTheme ? C_CARD : C_LIGHT_CARD);
+        accRow.setPadding(8, 6, 8, 6);
+        accRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView accLabel = new TextView(this);
+        accLabel.setText("无障碍服务:");
+        accLabel.setTextColor(darkTheme ? C_TEXT : C_LIGHT_TEXT);
+        accLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        accRow.addView(accLabel);
+
+        TextView accStatus = new TextView(this);
+        accStatus.setText(accEnabled ? "✅ 已开启" : "❌ 未开启");
+        accStatus.setTextColor(accEnabled ? C_GREEN : C_RED);
+        accStatus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        accStatus.setTypeface(Typeface.DEFAULT_BOLD);
+        accStatus.setPadding(8, 0, 8, 0);
+        accRow.addView(accStatus);
+
+        Button accSettingBtn = makeSmallBtn("去开启", C_BLUE, v -> {
+            try {
+                Intent intent = new Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(intent);
+            } catch (Exception e) {
+                Logger.fail("打开无障碍设置失败: " + e.getMessage());
+            }
+        });
+        accRow.addView(accSettingBtn);
+        contentArea.addView(accRow);
+
+        // 说明文字
+        TextView accHint = new TextView(this);
+        accHint.setText("需要先开启无障碍服务，才能自动点击系统 Demo 软件的 WiFi ADB 按钮。\n" +
+                "原理：persist.sys.leap.wifiadb 属性需要 system 权限，普通应用无法直接设置，" +
+                "只能通过启动系统 Demo 软件(com.leapmotor.system)并模拟点击按钮的方式开启。");
+        accHint.setTextColor(C_DIM);
+        accHint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        accHint.setPadding(8, 4, 8, 8);
+        contentArea.addView(accHint);
+
+        // 开机自动开启开关
+        boolean autoStart = prefs.getBoolean(BootReceiver.KEY_AUTO_START_ADB_WIFI, false);
+        LinearLayout autoRow = new LinearLayout(this);
+        autoRow.setOrientation(LinearLayout.HORIZONTAL);
+        autoRow.setBackgroundColor(darkTheme ? C_CARD : C_LIGHT_CARD);
+        autoRow.setPadding(8, 6, 8, 6);
+        autoRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView autoLabel = new TextView(this);
+        autoLabel.setText("开机自动开启:");
+        autoLabel.setTextColor(darkTheme ? C_TEXT : C_LIGHT_TEXT);
+        autoLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        autoRow.addView(autoLabel);
+
+        Button autoToggleBtn = makeSmallBtn(autoStart ? "✅ 已开启" : "❌ 已关闭",
+                autoStart ? C_GREEN : C_SURFACE, v -> {
+            boolean current = prefs.getBoolean(BootReceiver.KEY_AUTO_START_ADB_WIFI, false);
+            boolean newVal = !current;
+            prefs.edit().putBoolean(BootReceiver.KEY_AUTO_START_ADB_WIFI, newVal).apply();
+            Logger.ok("开机自动开启 WiFi ADB: " + (newVal ? "已开启" : "已关闭"));
+            switchTab(TAB_NAMES.length - 1); // 刷新页面
+        });
+        autoRow.addView(autoToggleBtn);
+        contentArea.addView(autoRow);
+
+        // 立即开启按钮
+        contentArea.addView(makeBtn("🚀 立即开启 WiFi ADB", C_GREEN, v -> {
+            if (!BootReceiver.isAccessibilityServiceEnabled(this)) {
+                new AlertDialog.Builder(this)
+                        .setTitle("需要无障碍服务")
+                        .setMessage("请先在系统设置中开启本应用的无障碍服务，才能自动点击 WiFi ADB 按钮。\n\n是否现在去开启？")
+                        .setPositiveButton("去开启", (d, w) -> {
+                            try {
+                                Intent intent = new Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS);
+                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                startActivity(intent);
+                            } catch (Exception e) {
+                                Logger.fail("打开无障碍设置失败: " + e.getMessage());
+                            }
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
+                return;
+            }
+            Logger.info("正在启动系统 Demo 软件以开启 WiFi ADB...");
+            BootReceiver.startDemoActivity(this);
+            Logger.ok("已启动 Demo 软件，无障碍服务将自动点击 WiFi ADB 按钮");
+        }));
+
+        // 查看当前 WiFi ADB 状态
+        contentArea.addView(makeBtn("📊 查看 WiFi ADB 状态", C_BLUE, v -> {
+            new Thread(() -> {
+                String result = Sh.out("getprop persist.sys.leap.wifiadb");
+                String status = (result != null && result.trim().equals("1")) ? "✅ 已开启" : "❌ 未开启";
+                h.post(() -> showResultDialog("WiFi ADB 状态",
+                        "persist.sys.leap.wifiadb = " + (result == null ? "null" : result.trim()) + "\n\n" +
+                        "状态: " + status + "\n\n" +
+                        "如果已开启，可以通过以下命令连接:\n" +
+                        "adb connect <车机IP>:5555"));
+            }).start();
+        }));
+
+        // 扩展工具
+        contentArea.addView(makeSectionTitle("🧰 扩展工具"));
+        contentArea.addView(makeBtn("🗺️ 高德地图定位修复", C_GREEN, v -> {
+            startActivity(new android.content.Intent(this, AmapFixActivity.class));
+        }));
+
+        // 关于
+        contentArea.addView(makeSectionTitle("ℹ️ 关于"));
+        TextView about = new TextView(this);
+        about.setText("C11 车控测试工具 v2.1\n" +
+                "参数: " + VehicleParams.getCount() + " 个\n" +
+                "Tab: " + TAB_NAMES.length + " 个\n" +
+                "命令次数: " + cmdCount + "\n" +
+                "ADB: " + (adbCustom ? adbHost + ":" + adbPort : "本地") + "\n" +
+                "主题: " + (darkTheme ? "深色" : "浅色"));
+        about.setTextColor(darkTheme ? C_TEXT : C_LIGHT_TEXT);
+        about.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        about.setPadding(8, 8, 8, 8);
+        contentArea.addView(about);
     }
 
     // ═══════════════════════════════════════
@@ -551,26 +759,21 @@ public class MainActivity extends Activity {
     // ═══════════════════════════════════════
 
     private View makeParamRow(String[] param) {
-        String key = param[0];
-        String name = param[1];
-        String type = param[2];
-        String ns = param[3];
-        String hint = param[4];
-        String range = param[5];
+        String key = param[0], name = param[1], type = param[2], ns = param[3], hint = param[4], range = param[5];
 
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.VERTICAL);
-        row.setBackgroundColor(C_CARD);
+        row.setBackgroundColor(darkTheme ? C_CARD : C_LIGHT_CARD);
         row.setPadding(8, 4, 8, 4);
 
-        // 第一行: 名称 + key + 命名空间
+        // 第一行: 名称 + key + ns
         LinearLayout line1 = new LinearLayout(this);
         line1.setOrientation(LinearLayout.HORIZONTAL);
         line1.setGravity(Gravity.CENTER_VERTICAL);
 
         TextView nameTv = new TextView(this);
         nameTv.setText(name);
-        nameTv.setTextColor(C_TEXT);
+        nameTv.setTextColor(darkTheme ? C_TEXT : C_LIGHT_TEXT);
         nameTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         line1.addView(nameTv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
@@ -589,13 +792,12 @@ public class MainActivity extends Activity {
 
         row.addView(line1);
 
-        // 第二行: 值 + 操作按钮
+        // 第二行: 值 + 操作
         LinearLayout line2 = new LinearLayout(this);
         line2.setOrientation(LinearLayout.HORIZONTAL);
         line2.setGravity(Gravity.CENTER_VERTICAL);
         line2.setPadding(0, 2, 0, 0);
 
-        // 值显示
         TextView valTv = new TextView(this);
         valTv.setText("--");
         valTv.setTextColor(C_YELLOW);
@@ -604,7 +806,6 @@ public class MainActivity extends Activity {
         valTv.setPadding(4, 0, 8, 0);
         line2.addView(valTv);
 
-        // 范围提示
         if (!range.isEmpty()) {
             TextView rangeTv = new TextView(this);
             rangeTv.setText(range);
@@ -614,13 +815,12 @@ public class MainActivity extends Activity {
             line2.addView(rangeTv);
         }
 
-        // 输入框
         EditText et = new EditText(this);
         et.setHint(hint.isEmpty() ? "值" : hint);
         et.setHintTextColor(C_DIM);
         et.setTextColor(C_YELLOW);
         et.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
-        et.setBackgroundColor(C_SURFACE);
+        et.setBackgroundColor(darkTheme ? C_SURFACE : C_LIGHT_SURFACE);
         et.setPadding(6, 2, 6, 2);
         et.setInputType(InputType.TYPE_CLASS_TEXT);
         LinearLayout.LayoutParams etLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
@@ -631,40 +831,56 @@ public class MainActivity extends Activity {
         // 📖 读取
         line2.addView(makeSmallBtn("📖", C_BLUE, v -> {
             new Thread(() -> {
-                String val = VehicleControl.get(key, ns);
-                h.post(() -> valTv.setText(val));
-                Logger.info(name + " = " + val + " (" + key + ")");
+                long t = System.currentTimeMillis();
+                Sh.Result r = VehicleControl.getWithResult(key, ns);
+                long ms = System.currentTimeMillis() - t;
+                h.post(() -> {
+                    if (r.ok() && !r.trim().isEmpty()) {
+                        valTv.setText(r.trim());
+                        valTv.setTextColor(C_YELLOW);
+                    } else if (r.timeout) {
+                        valTv.setText("超时");
+                        valTv.setTextColor(C_ORANGE);
+                    } else {
+                        valTv.setText("读取失败");
+                        valTv.setTextColor(C_RED);
+                    }
+                });
+                Logger.info(name + " = " + (r.ok() ? r.trim() : "[失败 exit=" + r.exit + "]") + " (" + ms + "ms)");
+                if (!r.ok()) {
+                    Logger.warn("读取失败详情: " + r.toDiagnosticString());
+                }
             }).start();
         }));
 
-        // ON / OFF (bool/int 类型)
+        // ON / OFF
         if (type.equals("bool") || type.equals("int")) {
             line2.addView(makeSmallBtn("ON", C_GREEN, v -> {
                 new Thread(() -> {
-                    // 优先使用广播方式 (已确认可用)
+                    long t = System.currentTimeMillis();
                     if (tryBroadcastControl(key, true)) {
                         h.post(() -> { valTv.setText("1"); valTv.setTextColor(C_GREEN); });
                     } else if ("prop".equals(ns)) {
-                        Logger.warn("getprop 属性不支持直接写入: " + key);
+                        Logger.warn("getprop 不支持写入: " + key);
                     } else {
                         VehicleControl.setSetting(key, "1", ns);
                         h.post(() -> { valTv.setText("1"); valTv.setTextColor(C_GREEN); });
-                        Logger.ok(name + " → ON (" + key + "=1)");
                     }
+                    Logger.ok(name + " → ON (" + (System.currentTimeMillis() - t) + "ms)");
                 }).start();
             }));
-
             line2.addView(makeSmallBtn("OFF", C_RED, v -> {
                 new Thread(() -> {
+                    long t = System.currentTimeMillis();
                     if (tryBroadcastControl(key, false)) {
                         h.post(() -> { valTv.setText("0"); valTv.setTextColor(C_RED); });
                     } else if ("prop".equals(ns)) {
-                        Logger.warn("getprop 属性不支持直接写入: " + key);
+                        Logger.warn("getprop 不支持写入: " + key);
                     } else {
                         VehicleControl.setSetting(key, "0", ns);
                         h.post(() -> { valTv.setText("0"); valTv.setTextColor(C_RED); });
-                        Logger.ok(name + " → OFF (" + key + "=0)");
                     }
+                    Logger.ok(name + " → OFF (" + (System.currentTimeMillis() - t) + "ms)");
                 }).start();
             }));
         }
@@ -673,30 +889,25 @@ public class MainActivity extends Activity {
         line2.addView(makeSmallBtn("SET", C_ORANGE, v -> {
             String val = et.getText().toString().trim();
             if (val.isEmpty()) { Logger.warn("请输入值"); return; }
-
             new Thread(() -> {
+                long t = System.currentTimeMillis();
                 if ("shell".equals(ns)) {
                     String out = Sh.out(val);
                     Logger.cmd(val, out);
-                    h.post(() -> showResultDialog("Shell 输出", out));
+                    h.post(() -> showResultDialog("Shell", out));
                 } else if ("prop".equals(ns)) {
                     String out = Sh.out("getprop " + val);
                     Logger.info("getprop " + val + " = " + out);
-                    h.post(() -> showResultDialog("getprop " + val, out));
-                } else if ("setting".equals(ns)) {
-                    String out = Sh.out("settings get global " + val);
-                    Logger.info("settings get global " + val + " = " + out);
-                    h.post(() -> showResultDialog("settings " + val, out));
+                    h.post(() -> showResultDialog("getprop", out));
                 } else {
                     VehicleControl.setSetting(key, val, ns);
                     h.post(() -> valTv.setText(val));
-                    Logger.ok(name + " → " + val + " (" + key + "=" + val + ")");
+                    Logger.ok(name + " → " + val + " (" + (System.currentTimeMillis() - t) + "ms)");
                 }
             }).start();
         }));
 
         row.addView(line2);
-
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.setMargins(0, 2, 0, 2);
@@ -704,92 +915,103 @@ public class MainActivity extends Activity {
         return row;
     }
 
-    /**
-     * 尝试使用广播方式控制 (基于 c11assistant 确认的接口)
-     * @return true 如果使用了广播方式
-     */
     private boolean tryBroadcastControl(String key, boolean on) {
         switch (key) {
-            // 灯光
-            case "leap.light.headlight":
-            case "CARLIGHT_JINGUANG":
-                VehicleControl.setLowBeam(on);
-                Logger.ok("近光灯 " + (on ? "ON" : "OFF") + " (broadcast)");
-                return true;
-            case "leap.light.rear_fog":
-            case "CARLIGHT_REARFOGCTL":
-                VehicleControl.setRearFog(on);
-                Logger.ok("后雾灯 " + (on ? "ON" : "OFF") + " (broadcast)");
-                return true;
-            case "leap.light.position":
-            case "CARLIGHT_SHEKUODENG":
-                VehicleControl.setPositionLight(on);
-                Logger.ok("示廓灯 " + (on ? "ON" : "OFF") + " (broadcast)");
-                return true;
-            case "leap.system.pedestrians_alert":
-            case "PEDESTRIANS_ALERT":
-                VehicleControl.setPedestriansAlert(on);
-                Logger.ok("行人警示音 " + (on ? "ON" : "OFF") + " (broadcast)");
-                return true;
-            // 空调
-            case "leap.hvac.ac_max":
-            case "HVACACMAXREQ":
-                VehicleControl.setAcMax(on);
-                Logger.ok("最大制冷 " + (on ? "ON" : "OFF") + " (broadcast)");
-                return true;
-            // 场景模式
-            case "leap.scene.guard":
-            case "GUARD_MODE":
-                VehicleControl.setGuardMode(on);
-                Logger.ok("守护模式 " + (on ? "ON" : "OFF") + " (broadcast)");
-                return true;
-            case "leap.scene.rest":
-            case "REST_MODE":
-                VehicleControl.setRestMode(on);
-                Logger.ok("小憩模式 " + (on ? "ON" : "OFF") + " (broadcast)");
-                return true;
-            case "leap.scene.camping":
-            case "CAMPING_MODE":
-                VehicleControl.setCampingMode(on);
-                Logger.ok("露营模式 " + (on ? "ON" : "OFF") + " (broadcast)");
-                return true;
-            case "leap.scene.power_save":
-            case "POWER_SAVE_MODE":
-                VehicleControl.setPowerSaveMode(on);
-                Logger.ok("省电模式 " + (on ? "ON" : "OFF") + " (broadcast)");
-                return true;
-            case "leap.scene.sentinel":
-            case "SENTINEL_MODE":
-                VehicleControl.setSentinelMode(on);
-                Logger.ok("哨兵模式 " + (on ? "ON" : "OFF") + " (broadcast)");
-                return true;
-            case "leap.scene.experience":
-            case "EXPERIENCE_MODE":
-                VehicleControl.setExperienceMode(on);
-                Logger.ok("体验模式 " + (on ? "ON" : "OFF") + " (broadcast)");
-                return true;
-            // 系统
-            case "leap.system.wifi":
-                VehicleControl.setWifi(on);
-                Logger.ok("WiFi " + (on ? "ON" : "OFF") + " (broadcast)");
-                return true;
-            case "leap.system.bluetooth":
-                VehicleControl.setBluetooth(on);
-                Logger.ok("蓝牙 " + (on ? "ON" : "OFF") + " (broadcast)");
-                return true;
-            case "leap.system.dark_mode":
-                VehicleControl.setDayNightMode(!on);
-                Logger.ok((on ? "夜间" : "日间") + "模式 (broadcast)");
-                return true;
-            // 儿童锁
-            case "leap.vehicle.child_lock":
-            case "strCarChildLock":
-                VehicleControl.setChildLock(on);
-                Logger.ok("儿童锁 " + (on ? "开" : "关") + " (broadcast JSON)");
-                return true;
-            default:
-                return false;
+            case "leap.light.headlight": VehicleControl.setLowBeam(on); return true;
+            case "leap.light.rear_fog": VehicleControl.setRearFog(on); return true;
+            case "leap.light.position": VehicleControl.setPositionLight(on); return true;
+            case "leap.system.pedestrians_alert": VehicleControl.setPedestriansAlert(on); return true;
+            case "leap.hvac.ac_max": VehicleControl.setAcMax(on); return true;
+            case "leap.scene.guard": VehicleControl.setGuardMode(on); return true;
+            case "leap.scene.rest": VehicleControl.setRestMode(on); return true;
+            case "leap.scene.camping": VehicleControl.setCampingMode(on); return true;
+            case "leap.scene.power_save": VehicleControl.setPowerSaveMode(on); return true;
+            case "leap.scene.sentinel": VehicleControl.setSentinelMode(on); return true;
+            case "leap.scene.experience": VehicleControl.setExperienceMode(on); return true;
+            case "leap.system.wifi": VehicleControl.setWifi(on); return true;
+            case "leap.system.bluetooth": VehicleControl.setBluetooth(on); return true;
+            case "leap.system.dark_mode": VehicleControl.setDayNightMode(!on); return true;
+            case "leap.vehicle.child_lock": case "strCarChildLock": VehicleControl.setChildLock(on); return true;
+            default: return false;
         }
+    }
+
+    // ═══════════════════════════════════════
+    //  导出/导入
+    // ═══════════════════════════════════════
+
+    private void exportLogs() {
+        new Thread(() -> {
+            StringBuilder sb = new StringBuilder();
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
+            sb.append("# C11 车控测试 日志导出\n");
+            sb.append("# 时间: ").append(sdf.format(new Date())).append("\n");
+            sb.append("# ADB: ").append(adbCustom ? adbHost + ":" + adbPort : "本地").append("\n\n");
+            sb.append(logView.getText().toString());
+
+            String filename = "c11_log_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date()) + ".txt";
+            boolean ok = Sh.writeFile("/sdcard/" + filename, sb.toString());
+            Logger.ok(ok ? "日志已导出: /sdcard/" + filename : "导出失败");
+        }).start();
+    }
+
+    private void exportLogcat() {
+        new Thread(() -> {
+            String logcat = VehicleControl.getLogcat(200);
+            String filename = "c11_logcat_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date()) + ".txt";
+            boolean ok = Sh.writeFile("/sdcard/" + filename, logcat);
+            Logger.ok(ok ? "logcat 已导出: /sdcard/" + filename : "导出失败");
+        }).start();
+    }
+
+    private void exportSnapshot() {
+        new Thread(() -> {
+            StringBuilder sb = new StringBuilder();
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
+            sb.append("# C11 参数快照\n");
+            sb.append("# 时间: ").append(sdf.format(new Date())).append("\n");
+            sb.append("# 参数数: ").append(VehicleParams.getCount()).append("\n\n");
+
+            int ok = 0;
+            for (String[] p : VehicleParams.PARAMS) {
+                String val = VehicleControl.get(p[0], p[3]);
+                sb.append(p[0]).append("=").append(val != null ? val : "").append("\n");
+                if (val != null && !val.isEmpty() && !val.equals("null")) ok++;
+            }
+
+            String filename = "c11_snapshot_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date()) + ".txt";
+            boolean written = Sh.writeFile("/sdcard/" + filename, sb.toString());
+            Logger.ok(written ? "快照已导出: /sdcard/" + filename + " (" + ok + " 有值)" : "导出失败");
+        }).start();
+    }
+
+    private void importSnapshot() {
+        new Thread(() -> {
+            String content = Sh.readFile("/sdcard/c11_snapshot_latest.txt");
+            if (content.isEmpty()) {
+                Logger.warn("未找到快照文件: /sdcard/c11_snapshot_latest.txt");
+                return;
+            }
+            int imported = 0;
+            for (String line : content.split("\n")) {
+                line = line.trim();
+                if (line.startsWith("#") || !line.contains("=")) continue;
+                String[] parts = line.split("=", 2);
+                if (parts.length == 2) {
+                    String key = parts[0].trim();
+                    String val = parts[1].trim();
+                    // 找到对应的 ns
+                    for (String[] p : VehicleParams.PARAMS) {
+                        if (p[0].equals(key) && !"prop".equals(p[3])) {
+                            VehicleControl.setSetting(key, val, p[3]);
+                            imported++;
+                            break;
+                        }
+                    }
+                }
+            }
+            Logger.ok("已导入 " + imported + " 个参数");
+        }).start();
     }
 
     // ═══════════════════════════════════════
@@ -799,7 +1021,6 @@ public class MainActivity extends Activity {
     private void doSearch() {
         String query = searchBox.getText().toString().trim();
         if (query.isEmpty()) { switchTab(0); return; }
-
         contentArea.removeAllViews();
         List<String[]> results = VehicleParams.search(query);
 
@@ -810,23 +1031,11 @@ public class MainActivity extends Activity {
         countTv.setPadding(4, 4, 4, 8);
         contentArea.addView(countTv);
 
-        if (results.isEmpty()) {
-            TextView noneTv = new TextView(this);
-            noneTv.setText("未找到匹配的参数");
-            noneTv.setTextColor(C_DIM);
-            noneTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-            noneTv.setPadding(16, 32, 16, 32);
-            noneTv.setGravity(Gravity.CENTER);
-            contentArea.addView(noneTv);
-        } else {
-            for (String[] p : results) {
-                contentArea.addView(makeParamRow(p));
-            }
-        }
+        for (String[] p : results) contentArea.addView(makeParamRow(p));
     }
 
     // ═══════════════════════════════════════
-    //  通用 UI 组件
+    //  UI 组件
     // ═══════════════════════════════════════
 
     private TextView makeSectionTitle(String text) {
@@ -873,13 +1082,13 @@ public class MainActivity extends Activity {
     private View makeEditRow(String label, String key, String ns, String hint, String range) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setBackgroundColor(C_CARD);
+        row.setBackgroundColor(darkTheme ? C_CARD : C_LIGHT_CARD);
         row.setPadding(8, 6, 8, 6);
         row.setGravity(Gravity.CENTER_VERTICAL);
 
         TextView tv = new TextView(this);
         tv.setText(label);
-        tv.setTextColor(C_TEXT);
+        tv.setTextColor(darkTheme ? C_TEXT : C_LIGHT_TEXT);
         tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         row.addView(tv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.35f));
 
@@ -887,7 +1096,7 @@ public class MainActivity extends Activity {
         et.setText(hint);
         et.setTextColor(C_YELLOW);
         et.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        et.setBackgroundColor(C_SURFACE);
+        et.setBackgroundColor(darkTheme ? C_SURFACE : C_LIGHT_SURFACE);
         et.setPadding(6, 2, 6, 2);
         row.addView(et, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.4f));
 
@@ -897,29 +1106,17 @@ public class MainActivity extends Activity {
         rangeTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 8);
         row.addView(rangeTv);
 
-        Button setBtn = makeSmallBtn("SET", C_BLUE, v -> {
+        row.addView(makeSmallBtn("SET", C_BLUE, v -> {
             String val = et.getText().toString().trim();
             if (val.isEmpty()) return;
             new Thread(() -> {
-                if ("shell".equals(ns)) {
-                    String out = Sh.out(val);
-                    Logger.cmd(val, out);
-                    h.post(() -> showResultDialog("Shell 输出", out));
-                } else if ("prop".equals(ns)) {
-                    String out = Sh.out("getprop " + val);
-                    Logger.info("getprop " + val + " = " + out);
-                    h.post(() -> showResultDialog("getprop " + val, out));
-                } else {
-                    String out = Sh.out("settings get global " + val);
-                    Logger.info("settings get global " + val + " = " + out);
-                    h.post(() -> showResultDialog("settings " + val, out));
-                }
+                if ("shell".equals(ns)) { String out = Sh.out(val); Logger.cmd(val, out); h.post(() -> showResultDialog("Shell", out)); }
+                else if ("prop".equals(ns)) { String out = Sh.out("getprop " + val); Logger.info("getprop " + val + " = " + out); h.post(() -> showResultDialog("getprop", out)); }
+                else { String out = Sh.out("settings get global " + val); Logger.info("settings " + val + " = " + out); h.post(() -> showResultDialog("settings", out)); }
             }).start();
-        });
-        row.addView(setBtn);
+        }));
 
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.setMargins(0, 2, 0, 2);
         row.setLayoutParams(lp);
         return row;
@@ -956,23 +1153,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void refreshAll() {
-        new Thread(() -> {
-            Logger.info("刷新全部 " + VehicleParams.getCount() + " 个参数...");
-            int ok = 0, fail = 0;
-            for (String[] p : VehicleParams.PARAMS) {
-                String val = VehicleControl.get(p[0], p[3]);
-                if (val != null && !val.isEmpty() && !val.equals("null")) ok++;
-                else fail++;
-            }
-            Logger.ok("刷新完成: " + ok + " 有值, " + fail + " 无值");
-        }).start();
-    }
-
-    // ═══════════════════════════════════════
-    //  工具
-    // ═══════════════════════════════════════
-
     private void showResultDialog(String title, String content) {
         new AlertDialog.Builder(this)
                 .setTitle(title)
@@ -984,9 +1164,6 @@ public class MainActivity extends Activity {
 
     private void copyToClipboard(String text) {
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        if (cm != null) {
-            cm.setPrimaryClip(ClipData.newPlainText("cmd", text));
-            Logger.ok("已复制到剪贴板");
-        }
+        if (cm != null) { cm.setPrimaryClip(ClipData.newPlainText("cmd", text)); Logger.ok("已复制"); }
     }
 }

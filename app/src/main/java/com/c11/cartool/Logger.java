@@ -8,41 +8,92 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 日志系统: Logcat + UI 回调 + 命令日志
+ * 日志系统（增强版）
+ *
+ * 功能：
+ *   - 日志分级：DEBUG / INFO / OK / WARN / ERROR / STEP / TITLE / CMD
+ *   - 时间戳 + 标签
+ *   - UI 回调（实时更新日志视图）
+ *   - 命令执行日志（含 exit code / stdout / stderr）
+ *   - 性能监控
+ *   - 日志上限（防止内存溢出，默认 1000 条）
+ *   - 导出全部日志
  */
 public final class Logger {
     private static final String TAG = "C11CarTool";
     private static final SimpleDateFormat TS =
-            new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
+            new SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault());
 
-    public enum Level { STEP, INFO, OK, WARN, FAIL, TITLE, CMD }
+    /** 日志上限（超过自动清空旧的） */
+    private static final int MAX_LOG_ENTRIES = 1000;
+
+    public enum Level { DEBUG, INFO, OK, WARN, ERROR, STEP, TITLE, CMD }
 
     public interface Callback { void onLog(String line, Level level); }
+    public interface PerfCallback { void onPerf(String cmd, long durationMs); }
 
     private static Callback cb;
+    private static PerfCallback perfCb;
     private static final List<String> cmdLog = new ArrayList<>();
 
     public static void setCallback(Callback c) { cb = c; }
+    public static void setPerfCallback(PerfCallback c) { perfCb = c; }
 
-    public static void title(String msg) { log(Level.TITLE, msg); }
-    public static void step(String msg)  { log(Level.STEP,  msg); }
-    public static void info(String msg)  { log(Level.INFO,  msg); }
-    public static void ok(String msg)    { log(Level.OK,    msg); }
-    public static void warn(String msg)  { log(Level.WARN,  msg); }
-    public static void fail(String msg)  { log(Level.FAIL,  msg); }
+    // ═══ 带标签的日志方法（用于模块区分） ═══
+
+    public static void debug(String tag, String msg) { log(Level.DEBUG, tag, msg); }
+    public static void info(String tag, String msg)  { log(Level.INFO, tag, msg); }
+    public static void ok(String tag, String msg)    { log(Level.OK, tag, msg); }
+    public static void warn(String tag, String msg)  { log(Level.WARN, tag, msg); }
+    public static void error(String tag, String msg) { log(Level.ERROR, tag, msg); }
+
+    // ═══ 不带标签的日志方法（兼容旧代码） ═══
+
+    public static void title(String msg) { log(Level.TITLE, null, msg); }
+    public static void step(String msg)  { log(Level.STEP, null, msg); }
+    public static void info(String msg)  { log(Level.INFO, null, msg); }
+    public static void ok(String msg)    { log(Level.OK, null, msg); }
+    public static void warn(String msg)  { log(Level.WARN, null, msg); }
+    public static void fail(String msg)  { log(Level.ERROR, null, msg); }
+    public static void error(String msg) { log(Level.ERROR, null, msg); }
+    public static void debug(String msg) { log(Level.DEBUG, null, msg); }
+
+    // ═══ 命令执行日志 ═══
 
     public static void cmd(String command, Sh.Result result) {
-        String entry = "$ " + command + "\n  exit=" + result.exit
-                + " out=\"" + trunc(result.out, 300) + "\""
-                + " err=\"" + trunc(result.err, 100) + "\"";
-        synchronized (cmdLog) { cmdLog.add(entry); }
-        log(Level.CMD, command + " → " + (result.ok() ? "OK" : "exit=" + result.exit));
+        String entry = TS.format(new Date()) + " $ " + command
+                + "\n  exit=" + result.exit
+                + " duration=" + result.durationMs + "ms"
+                + (result.timeout ? " [TIMEOUT]" : "")
+                + "\n  out=\"" + trunc(result.out, 500) + "\""
+                + "\n  err=\"" + trunc(result.err, 200) + "\"";
+        addCmdLog(entry);
+        log(Level.CMD, null, command + " → " + (result.ok() ? "OK" : "exit=" + result.exit));
     }
 
     public static void cmd(String command, String output) {
-        String entry = "$ " + command + "\n  → " + trunc(output, 300);
-        synchronized (cmdLog) { cmdLog.add(entry); }
-        log(Level.CMD, command + " → " + trunc(output, 100));
+        String entry = TS.format(new Date()) + " $ " + command + "\n  → " + trunc(output, 500);
+        addCmdLog(entry);
+        log(Level.CMD, null, command + " → " + trunc(output, 100));
+    }
+
+    public static void onPerf(String cmd, long durationMs) {
+        if (perfCb != null) perfCb.onPerf(cmd, durationMs);
+    }
+
+    // ═══ 日志管理 ═══
+
+    private static void addCmdLog(String entry) {
+        synchronized (cmdLog) {
+            cmdLog.add(entry);
+            // 超过上限时清空最旧的一半
+            if (cmdLog.size() > MAX_LOG_ENTRIES) {
+                int removeCount = MAX_LOG_ENTRIES / 2;
+                for (int i = 0; i < removeCount; i++) {
+                    cmdLog.remove(0);
+                }
+            }
+        }
     }
 
     private static String trunc(String s, int max) {
@@ -59,20 +110,64 @@ public final class Logger {
         synchronized (cmdLog) { cmdLog.clear(); }
     }
 
-    private static void log(Level lv, String msg) {
-        String ts = TS.format(new Date());
-        String line = "[" + ts + "] " + msg;
+    /**
+     * 导出全部日志（含时间戳、设备信息）
+     */
+    public static String exportAll() {
+        StringBuilder sb = new StringBuilder();
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
+        sb.append("# C11 车控测试 日志导出\n");
+        sb.append("# 导出时间: ").append(sdf.format(new Date())).append("\n");
+        sb.append("# APP 版本: 0.2.20260916\n");
+        sb.append("# 日志条数: ").append(cmdLog.size()).append("\n\n");
+        synchronized (cmdLog) {
+            for (String entry : cmdLog) {
+                sb.append(entry).append("\n");
+            }
+        }
+        return sb.toString();
+    }
 
+    /**
+     * 获取最近 N 条日志
+     */
+    public static String getRecentLogs(int count) {
+        StringBuilder sb = new StringBuilder();
+        synchronized (cmdLog) {
+            int start = Math.max(0, cmdLog.size() - count);
+            for (int i = start; i < cmdLog.size(); i++) {
+                sb.append(cmdLog.get(i)).append("\n");
+            }
+        }
+        return sb.toString();
+    }
+
+    // ═══ 核心日志方法 ═══
+
+    private static void log(Level lv, String tag, String msg) {
+        String ts = TS.format(new Date());
+        String tagStr = (tag != null && !tag.isEmpty()) ? " [" + tag + "]" : "";
+        String line = "[" + ts + "]" + tagStr + " " + msg;
+
+        // 输出到 logcat（普通应用只能看到自己的日志，但这是标准做法）
         switch (lv) {
             case TITLE: Log.i(TAG, "═══ " + msg); break;
             case STEP:  Log.i(TAG, "  → " + msg); break;
             case OK:    Log.i(TAG, "  ✅ " + msg); break;
-            case FAIL:  Log.w(TAG, "  ❌ " + msg); break;
+            case ERROR: Log.e(TAG, "  ❌ " + msg); break;
             case WARN:  Log.w(TAG, "  ⚠️ " + msg); break;
             case CMD:   Log.d(TAG, "  $ " + msg); break;
+            case DEBUG: Log.d(TAG, "  · " + msg); break;
             default:    Log.i(TAG, "  " + msg); break;
         }
 
-        if (cb != null) cb.onLog(line, lv);
+        // UI 回调
+        if (cb != null) {
+            try {
+                cb.onLog(line, lv);
+            } catch (Exception e) {
+                Log.e(TAG, "Logger callback error: " + e.getMessage());
+            }
+        }
     }
 }
