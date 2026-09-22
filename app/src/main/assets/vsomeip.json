@@ -1,0 +1,43 @@
+{
+    "unicast": "192.168.1.3",
+    "logging": {
+        "level": "debug",
+        "console": "true"
+    },
+    "applications": [
+        {
+            "name": "gaode_sub",
+            "id": "0x9011"
+        },
+        {
+            "name": "gaode_pub",
+            "id": "0x9012"
+        }
+    ],
+    "services": [
+        {
+            "service": "0x8011",
+            "instance": "0x8012",
+            "unreliable": "30515"
+        },
+        {
+            "service": "0x1062",
+            "instance": "0x5062",
+            "unreliable": "30516"
+        }
+    ],
+    "routing": "someip_route",
+    "service-discovery": {
+        "enable": "true",
+        "multicast": "224.224.244.245",
+        "port": "30490",
+        "protocol": "udp",
+        "initial_delay_min": "10",
+        "initial_delay_max": "100",
+        "repetitions_base_delay": "200",
+        "repetitions_max": "3",
+        "ttl": "3",
+        "cyclic_offer_delay": "2000",
+        "request_response_delay": "1500"
+    }
+}

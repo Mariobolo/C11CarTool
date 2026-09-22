@@ -30,12 +30,23 @@ public final class VehicleControl {
     // ═══ 读取 ═══
 
     public static String get(String key, String ns) {
+        return getWithResult(key, ns).trim();
+    }
+
+    /**
+     * 读取参数（返回完整 Result，包含 exit code/stdout/stderr）
+     */
+    public static Sh.Result getWithResult(String key, String ns) {
+        String cmd;
         switch (ns) {
-            case "prop":    return Sh.out("getprop " + key);
-            case "setting": return Sh.out("settings get global " + key);
-            case "system":  return Sh.out("settings get system " + key);
-            default:        return Sh.out("getprop " + key);
+            case "prop":    cmd = "getprop " + key; break;
+            case "setting": cmd = "settings get global " + key; break;
+            case "system":  cmd = "settings get system " + key; break;
+            default:        cmd = "getprop " + key; break;
         }
+        Sh.Result r = Sh.run(cmd);
+        Logger.cmd(cmd, r);
+        return r;
     }
 
     // ═══ 写入 Settings.Global ═══
@@ -80,75 +91,98 @@ public final class VehicleControl {
         Logger.cmd(cmd, r);
     }
 
+    // ═══ 车辆控制广播 (正确协议: type + state) ═══
+
+    /**
+     * 发送车辆控制广播 —— 零跑车机标准协议
+     *
+     * 协议格式 (参考 vehicle_control_interfaces.md 第 4 节):
+     *   am broadcast -a <action> --es type "<type>" --ei state <state>
+     *
+     * 接收方根据 type 分发控制类型，根据 state 执行开关/模式切换。
+     * 注意: 旧版代码错误地将 type 值当作 extra 名称，导致控制全部失效。
+     *
+     * @param action 广播 Action，如 ACTION_TO_CAR_CONTROL
+     * @param type   控制类型名称，如 "CARLIGHT_JINGUANG"
+     * @param state  状态值，如 1=开/0=关，或模式编号
+     */
+    public static void broadcastControl(String action, String type, int state) {
+        String cmd = "am broadcast -a " + action
+                + " --es type \"" + type + "\""
+                + " --ei state " + state;
+        Sh.Result r = Sh.run(cmd);
+        Logger.cmd(cmd, r);
+    }
+
     // ═══ 灯光控制 ═══
 
     public static void setLowBeam(boolean on) {
-        broadcastInt(ACTION_TO_CAR_CONTROL, "CARLIGHT_JINGUANG", on ? 1 : 0);
+        broadcastControl(ACTION_TO_CAR_CONTROL, "CARLIGHT_JINGUANG", on ? 1 : 0);
     }
 
     public static void setRearFog(boolean on) {
-        broadcastInt(ACTION_TO_CAR_CONTROL, "CARLIGHT_REARFOGCTL", on ? 1 : 0);
+        broadcastControl(ACTION_TO_CAR_CONTROL, "CARLIGHT_REARFOGCTL", on ? 1 : 0);
     }
 
     public static void setPositionLight(boolean on) {
-        broadcastInt(ACTION_TO_CAR_CONTROL, "CARLIGHT_SHEKUODENG", on ? 1 : 0);
+        broadcastControl(ACTION_TO_CAR_CONTROL, "CARLIGHT_SHEKUODENG", on ? 1 : 0);
     }
 
     public static void setPedestriansAlert(boolean on) {
-        broadcastInt(ACTION_TO_CAR_CONTROL, "PEDESTRIANS_ALERT", on ? 1 : 0);
+        broadcastControl(ACTION_TO_CAR_CONTROL, "PEDESTRIANS_ALERT", on ? 1 : 0);
     }
 
     // ═══ 驾驶模式 ═══
 
     /** 0=舒适 1=运动 2=自定义 3=极致 4=经济 */
     public static void setDriverMode(int mode) {
-        broadcastInt(ACTION_TO_CAR_CONTROL, "MMI_DRIVER_MODE_SET", mode);
+        broadcastControl(ACTION_TO_CAR_CONTROL, "MMI_DRIVER_MODE_SET", mode);
     }
 
     // ═══ 场景模式 ═══
 
     public static void setGuardMode(boolean on) {
-        broadcastInt(ACTION_TO_CAR_CONTROL, "GUARD_MODE", on ? 1 : 0);
+        broadcastControl(ACTION_TO_CAR_CONTROL, "GUARD_MODE", on ? 1 : 0);
     }
 
     public static void setRestMode(boolean on) {
-        broadcastInt(ACTION_TO_CAR_CONTROL, "REST_MODE", on ? 1 : 0);
+        broadcastControl(ACTION_TO_CAR_CONTROL, "REST_MODE", on ? 1 : 0);
     }
 
     public static void setCampingMode(boolean on) {
-        broadcastInt(ACTION_TO_CAR_CONTROL, "CAMPING_MODE", on ? 1 : 0);
+        broadcastControl(ACTION_TO_CAR_CONTROL, "CAMPING_MODE", on ? 1 : 0);
     }
 
     public static void setPowerSaveMode(boolean on) {
-        broadcastInt(ACTION_TO_CAR_CONTROL, "POWER_SAVE_MODE", on ? 1 : 0);
+        broadcastControl(ACTION_TO_CAR_CONTROL, "POWER_SAVE_MODE", on ? 1 : 0);
     }
 
     public static void setSentinelMode(boolean on) {
-        broadcastInt(ACTION_TO_CAR_CONTROL, "SENTINEL_MODE", on ? 1 : 0);
+        broadcastControl(ACTION_TO_CAR_CONTROL, "SENTINEL_MODE", on ? 1 : 0);
     }
 
     public static void setExperienceMode(boolean on) {
-        broadcastInt(ACTION_TO_CAR_CONTROL, "EXPERIENCE_MODE", on ? 1 : 0);
+        broadcastControl(ACTION_TO_CAR_CONTROL, "EXPERIENCE_MODE", on ? 1 : 0);
     }
 
     // ═══ 空调 ═══
 
     public static void setAcMax(boolean on) {
-        broadcastInt(ACTION_TO_AIR_CONDITIONER, "HVACACMAXREQ", on ? 1 : 0);
+        broadcastControl(ACTION_TO_AIR_CONDITIONER, "HVACACMAXREQ", on ? 1 : 0);
     }
 
     // ═══ 系统设置 ═══
 
     public static void setWifi(boolean on) {
-        broadcastInt(ACTION_TO_SETTINGS, "wifi", on ? 1 : 0);
+        broadcastControl(ACTION_TO_SETTINGS, "wifi", on ? 1 : 0);
     }
 
     public static void setBluetooth(boolean on) {
-        broadcastInt(ACTION_TO_SETTINGS, "bluetooth", on ? 1 : 0);
+        broadcastControl(ACTION_TO_SETTINGS, "bluetooth", on ? 1 : 0);
     }
 
     public static void setDayNightMode(boolean dayMode) {
-        broadcastInt(ACTION_TO_SETTINGS, "mode", dayMode ? 1 : 0);
+        broadcastControl(ACTION_TO_SETTINGS, "mode", dayMode ? 1 : 0);
     }
 
     // ═══ 儿童锁 (JSON 协议) ═══

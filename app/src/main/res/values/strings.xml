@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">C11 车控测试</string>
+    <string name="accessibility_service_description">C11 车控工具的无障碍服务，用于自动点击零跑系统 Demo 软件的 WiFi ADB 开关按钮，实现开机自动开启 WiFi ADB。不会收集任何个人信息。</string>
 </resources>
