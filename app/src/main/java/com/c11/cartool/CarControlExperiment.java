@@ -74,88 +74,85 @@ public final class CarControlExperiment {
     public static List<Step> buildDefaultSteps(com.c11.cartool.vehicle.VehicleController vc) {
         List<Step> steps = new ArrayList<>();
 
-        // ── 空调：先最大制冷（已验证通道）再常规空调流程（依赖前置） ──
-        steps.add(new Step("ac_max_on", "最大制冷 ON", "旧广播 toairconditioner",
-                "发送最大制冷开启（已验证通道），观察空调是否进入最大制冷。", true,
+        // ══════════ A. 空调座舱（settings global，0921 真机标定 ✅） ══════════
+        steps.add(new Step("ac_on", "✅ 空调 ON", "settings global strCarAirSwitch",
+                "写入 strCarAirSwitch=1 开启空调，观察出风。", true,
+                () -> vc.acSwitchOn(), null));
+        steps.add(new Step("ac_temp", "✅ 温度 SET 24°", "settings global strCar1409/1410",
+                "主副驾温度写 48（=24℃×2），观察空调温度显示（回读见日志）。", true,
+                () -> vc.setAcTemperature(24), null));
+        steps.add(new Step("ac_fan", "✅ 风量 SET 4", "settings global strCarAirWind",
+                "风量写 4（范围 0-7），观察风量变化（回读见日志）。", true,
+                () -> vc.setAcFanSpeed(4), null));
+        steps.add(new Step("defrost_f_on", "✅ 前除霜 ON", "settings global strCarFrontDefrost",
+                "写入 strCarFrontDefrost=1，观察前挡出风与图标。", true,
+                () -> vc.frontDefrostOn(), null));
+        steps.add(new Step("defrost_f_off", "✅ 前除霜 OFF 收尾", "settings global strCarFrontDefrost",
+                "写入 strCarFrontDefrost=0 收尾，确认除霜关闭。", true,
+                () -> vc.frontDefrostOff(), null));
+        steps.add(new Step("ac_max_on", "✅ 最大制冷 ON", "旧广播 HVACACMAXREQ",
+                "发送最大制冷开启（旧语音广播，已验证），观察空调进入最大制冷。", true,
                 () -> vc.acMaxOn(), null));
-        steps.add(new Step("ac_max_off", "最大制冷 OFF", "旧广播 toairconditioner",
+        steps.add(new Step("ac_max_off", "✅ 最大制冷 OFF", "旧广播 HVACACMAXREQ",
                 "关闭最大制冷，验证关断逻辑。", true,
                 () -> vc.acMaxOff(), null));
-
-        // ── 车锁通道标定（人在车内、P 挡、带钥匙；逐项点确认并目视哪一步真正落锁，反馈后定主通道）──
-        steps.add(new Step("lock_set_1", "锁车① settings写1", "settings global",
-                "向 strCarVehicleLock 写 1，观察四门是否落锁（回读值见日志）。", true,
-                () -> vc.lockCarSettings(true), null));
-        steps.add(new Step("unlock_set_0", "解锁① settings写0", "settings global",
-                "向 strCarVehicleLock 写 0，观察四门是否解锁。", true,
-                () -> vc.lockCarSettings(false), null));
-        steps.add(new Step("lock_rw_1", "锁车② Rightware state1", "Rightware startservice",
-                "vehicle_lock 传 state=1（与现通道相反），观察是否落锁。", true,
-                vc::lockCarRwAlt, null));
-        steps.add(new Step("unlock_rw_0", "解锁收尾② state0", "Rightware startservice",
-                "vehicle_lock 传 state=0 收尾，确认车门最终处于解锁状态。", true,
-                vc::unlockCarRwAlt, null));
-
-        // ── 灯光：近光 ON→OFF 成对 ──
-        steps.add(new Step("lowbeam_on", "近光灯 ON", "旧广播 tocarcontrol",
-                "开启近光灯，观察灯光点亮。", true,
-                () -> vc.lowBeamOn(), null));
-        steps.add(new Step("lowbeam_off", "近光灯 OFF", "旧广播 tocarcontrol",
-                "关闭近光灯，观察灯光熄灭。", true,
-                () -> vc.lowBeamOff(), null));
-
-        // ── 儿童锁（handMessage，已验证格式） ──
-        steps.add(new Step("childlock_l", "左儿童锁 ON", "讯飞 handMessage",
-                "开启左后儿童锁，观察车机/仪表是否有响应提示。", true,
-                () -> vc.leftChildLockOn(), null));
-        steps.add(new Step("childlock_r", "右儿童锁 ON", "讯飞 handMessage",
-                "开启右后儿童锁，观察车机/仪表是否有响应提示。", true,
-                () -> vc.rightChildLockOn(), null));
-
-        // ── 空调常规流程：开→温度→风量→关（依赖前置） ──
-        steps.add(new Step("ac_on", "空调 ON", "讯飞 handMessage",
-                "开启空调，观察出风。", true,
-                () -> vc.acOn(), null));
-        steps.add(new Step("ac_temp", "温度 SET 24°", "讯飞 handMessage",
-                "设置温度 24°C（依赖空调已开启），观察空调温度显示。", true,
-                () -> vc.setAcTemperature(24), null));
-        steps.add(new Step("ac_fan", "风量 SET 4", "讯飞 handMessage",
-                "设置风量 4 档（依赖空调已开启），观察风量变化。", true,
-                () -> vc.setAcFanSpeed(4), null));
-        steps.add(new Step("ac_off", "空调 OFF", "讯飞 handMessage",
-                "关闭空调，观察停止出风。", true,
-                () -> vc.acOff(), null));
-
-        // ── 车窗：主驾升→降 成对 ──
-        steps.add(new Step("win_fl_up", "主驾车窗升", "讯飞 handMessage",
-                "主驾车窗升到 100%，观察车窗动作。", true,
-                () -> vc.setWindow("front_left", 100), null));
-        steps.add(new Step("win_fl_down", "主驾车窗降", "讯飞 handMessage",
-                "主驾车窗降到 0%，观察车窗动作。", true,
-                () -> vc.setWindow("front_left", 0), null));
-
-        // ── 除霜 / 360 / 后备箱 ──
-        steps.add(new Step("defrost_f", "前除霜 ON", "讯飞 handMessage",
-                "开启前除霜，观察风挡出风与图标。", true,
-                () -> vc.frontDefrostOn(), null));
-        steps.add(new Step("view_360", "360 全景", "讯飞 handMessage",
-                "开启 360 全景影像，观察中控显示。", true,
-                () -> vc.open360View(), null));
-        steps.add(new Step("trunk_open", "后备箱开", "讯飞 handMessage",
-                "开启后备箱，观察尾门动作。", true,
-                () -> vc.openTrunk(), null));
-        steps.add(new Step("trunk_close", "后备箱关", "讯飞 handMessage",
-                "关闭后备箱，观察尾门动作。", true,
-                () -> vc.closeTrunk(), null));
-
-        // ── 空调界面（settings 通道，可主动判定） ──
-        steps.add(new Step("ac_ui", "打开空调界面", "settings put global strCar100006",
+        steps.add(new Step("ac_ui", "✅ 打开空调界面", "settings put global strCar100006",
                 "写入 strCar100006=1 打开空调界面，随后查询验证。", true,
                 () -> Sh.run("settings put global strCar100006 1"),
                 () -> {
                     Sh.Result r = Sh.run("settings get global strCar100006");
                     return "1".equals(r.trim());
                 }));
+        steps.add(new Step("ac_off", "✅ 空调 OFF 收尾", "settings global strCarAirSwitch",
+                "写入 strCarAirSwitch=0 关闭空调，确认停止出风。", true,
+                () -> vc.acSwitchOff(), null));
+
+        // ══════════ B. 灯光（旧语音广播，真机验证 ✅） ══════════
+        steps.add(new Step("lowbeam_on", "✅ 近光灯 ON", "旧广播 CARLIGHT_JINGUANG",
+                "开启近光灯，观察灯光点亮。", true,
+                () -> vc.lowBeamOn(), null));
+        steps.add(new Step("lowbeam_off", "✅ 近光灯 OFF", "旧广播 CARLIGHT_JINGUANG",
+                "关闭近光灯，观察灯光熄灭。", true,
+                () -> vc.lowBeamOff(), null));
+
+        // ══════════ C. 车身功能（讯飞 handMessage，真机验证 ✅） ══════════
+        steps.add(new Step("childlock_l", "✅ 左儿童锁 ON", "讯飞 handMessage",
+                "开启左后儿童锁，观察车机/仪表响应提示。", true,
+                () -> vc.leftChildLockOn(), null));
+        steps.add(new Step("childlock_r", "✅ 右儿童锁 ON", "讯飞 handMessage",
+                "开启右后儿童锁，观察车机/仪表响应提示。", true,
+                () -> vc.rightChildLockOn(), null));
+        steps.add(new Step("view_360", "✅ 360 全景", "讯飞 handMessage",
+                "开启 360 全景影像，观察中控显示。", true,
+                () -> vc.open360View(), null));
+        steps.add(new Step("trunk_open", "✅ 后备箱开", "讯飞 handMessage",
+                "确认车尾无人无物后开启后备箱，观察尾门动作。", true,
+                () -> vc.openTrunk(), null));
+        steps.add(new Step("trunk_close", "✅ 后备箱关", "讯飞 handMessage",
+                "关闭后备箱，观察尾门动作。", true,
+                () -> vc.closeTrunk(), null));
+
+        // ══════════ D. ⚠ 实验性（通道未标定，逐项目视，车锁最终保持解锁） ══════════
+        // 车锁：人在车内、P 挡、带钥匙；目视哪一步真正落锁，反馈后定主通道
+        steps.add(new Step("lock_set_1", "⚠ 锁车① settings写1", "settings global（实验性）",
+                "【实验性】向 strCarVehicleLock 写 1，观察四门是否落锁（回读值见日志）。", true,
+                () -> vc.lockCarSettings(true), null));
+        steps.add(new Step("unlock_set_0", "⚠ 解锁① settings写0", "settings global（实验性）",
+                "【实验性】向 strCarVehicleLock 写 0，观察四门是否解锁。", true,
+                () -> vc.lockCarSettings(false), null));
+        steps.add(new Step("lock_rw_1", "⚠ 锁车② Rightware state1", "Rightware startservice（实验性）",
+                "【实验性】vehicle_lock 传 state=1，观察是否落锁。", true,
+                vc::lockCarRwAlt, null));
+        steps.add(new Step("unlock_rw_0", "⚠ 解锁收尾② state0", "Rightware startservice（实验性）",
+                "【实验性】vehicle_lock 传 state=0 收尾，确认车门最终处于解锁状态。", true,
+                vc::unlockCarRwAlt, null));
+        // 车窗：handMessage 格式已验证，实车动作尚未标定
+        steps.add(new Step("win_fl_up", "⚠ 主驾车窗升", "讯飞 handMessage（实验性）",
+                "【实验性】确认车窗无障碍，主驾车窗升到 100%，观察动作。", true,
+                () -> vc.setWindow("front_left", 100), null));
+        steps.add(new Step("win_fl_down", "⚠ 主驾车窗降", "讯飞 handMessage（实验性）",
+                "【实验性】主驾车窗降到 0%，观察车窗动作。", true,
+                () -> vc.setWindow("front_left", 0), null));
 
         return steps;
     }

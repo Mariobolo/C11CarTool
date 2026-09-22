@@ -10,10 +10,10 @@ public final class AppInfo {
     private AppInfo() {}
 
     /** 版本号（与 build.gradle versionName 保持一致） */
-    public static final String VERSION = "0.3.5";
+    public static final String VERSION = "0.3.5.1";
 
     /** 内部版本号（与 build.gradle versionCode 保持一致） */
-    public static final int VERSION_CODE = 10;
+    public static final int VERSION_CODE = 11;
 
     /** 应用显示名 */
     public static final String APP_NAME = "C11 车控";
@@ -26,7 +26,8 @@ public final class AppInfo {
      * 每行一条，格式：- 功能说明
      */
     public static final String FEATURE_LIST =
-            "- v0.3.5 公开版：打开即仪表盘（按钮+数据方块+图标，固定网格 12 列）\n"
+            "- v0.3.5.1 修复版：状态条显示版本号、Web 弹窗带扫码二维码、诊断报告含 ADB 公钥指纹、车控实验清单按真机标定更新\n"
+            + "- v0.3.5 公开版：打开即仪表盘（按钮+数据方块+图标，固定网格 12 列）\n"
             + "- 数据方块：电量/续航/电压/车外温度/胎压胎温/车门/PM2.5/四路音量，5s 自动刷新\n"
             + "- 空调大卡：主副驾温度/风量步进 + AC/最大制冷/内外循环/前后除霜（settings 真机键+回读）\n"
             + "- 灯光车身：近光/示廓/后雾/360/儿童锁/后备箱（旧语音广播与讯飞 handMessage）\n"

@@ -168,7 +168,8 @@ public final class AdbClient {
     }
 
     /** ADB 公钥指纹（SHA-256 前 8 字节，冒号分隔），用于核对每次连接是否同一密钥 */
-    private String keyFingerprint() {
+    /** 当前密钥对的 ADB 公钥指纹（MD5 风格），供诊断报告与车机授权弹窗比对 */
+    public synchronized String keyFingerprint() {
         try {
             byte[] dg = java.security.MessageDigest.getInstance("SHA-256").digest(adbPublicKeyBytes);
             StringBuilder sb = new StringBuilder();

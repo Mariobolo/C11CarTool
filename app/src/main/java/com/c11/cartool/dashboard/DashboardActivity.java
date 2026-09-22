@@ -3,21 +3,25 @@ package com.c11.cartool.dashboard;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.graphics.Bitmap;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.c11.cartool.AppInfo;
 import com.c11.cartool.CrashHandler;
 import com.c11.cartool.Logger;
 import com.c11.cartool.MainActivity;
 import com.c11.cartool.Sh;
 import com.c11.cartool.WebServer;
+import com.c11.cartool.util.QrBitmap;
 import com.c11.cartool.vehicle.VehicleController;
 
 import java.text.SimpleDateFormat;
@@ -131,6 +135,11 @@ public class DashboardActivity extends Activity {
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setBackgroundColor(DashboardTheme.SURFACE);
         bar.setPadding(dp(14), dp(8), dp(8), dp(8));
+
+        // 版本号（第一屏可辨，防止安装旧包白跑）
+        TextView verView = chip("🚗 v" + AppInfo.VERSION, DashboardTheme.CYAN);
+        verView.setTypeface(Typeface.DEFAULT_BOLD);
+        bar.addView(verView, chipLp());
 
         // ADB 状态（点击连接）
         adbStatusView = chip("ADB", DashboardTheme.RED);
@@ -564,16 +573,38 @@ public class DashboardActivity extends Activity {
     }
 
     private void showWebInfoDialog(boolean adbOnly) {
+        int port = webServer.isRunning() ? webServer.getPort() : 8080;
+        String url = "http://" + WebServer.getDeviceIp() + ":" + port;
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(16);
+        box.setPadding(pad, pad, pad, 0);
+
+        // 二维码：手机连同一 WiFi 扫码即开
+        ImageView qrView = new ImageView(this);
+        qrView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        Bitmap qrBmp = QrBitmap.toBitmap(url, 8);
+        if (qrBmp != null) {
+            qrView.setImageBitmap(qrBmp);
+            LinearLayout.LayoutParams qlp = new LinearLayout.LayoutParams(dp(220), dp(220));
+            qlp.gravity = Gravity.CENTER_HORIZONTAL;
+            box.addView(qrView, qlp);
+        }
+
         StringBuilder sb = new StringBuilder();
-        sb.append("手机连同一 WiFi，浏览器输入：\n\n");
-        sb.append("  http://").append(WebServer.getDeviceIp()).append(":")
-          .append(webServer.isRunning() ? webServer.getPort() : 8080).append("\n\n");
-        sb.append("本机全部 IP：\n");
+        sb.append("\n手机连同一 WiFi，扫码或浏览器输入：\n  ").append(url).append("\n\n");
+        sb.append("本机全部 IP（手机须与 wlan0 同网段）：\n");
         for (String s : WebServer.getAllIps()) sb.append("  ").append(s).append("\n");
         if (adbOnly) sb.append("\nADB 已连接，可点「工程模式」做完整调试。");
+        TextView tv = new TextView(this);
+        tv.setText(sb.toString());
+        tv.setTextSize(13);
+        box.addView(tv);
+
         new AlertDialog.Builder(this)
                 .setTitle("🌐 Web 遥控")
-                .setMessage(sb.toString())
+                .setView(box)
                 .setPositiveButton("好的", null)
                 .show();
     }

@@ -114,6 +114,8 @@ public final class DiagnosticMode {
         report.append("  id: ").append(Sh.whoami()).append("\n");
         report.append("  uid: ").append(Sh.uid()).append("\n");
         report.append("  ADB 模式: ").append(Sh.isAdbConnected() ? "✅ 已连接 (shell uid=2000)" : "❌ 未连接 (应用uid)").append("\n");
+        report.append("  本地ADB公钥指纹: ").append(Sh.getAdbKeyFingerprint()).append("\n");
+        report.append("    （与车机授权弹窗指纹比对：指纹恒定但车机仍每次重弹=车机端不保存密钥）\n");
         report.append("  Android 版本: ").append(prop(props, "ro.build.version.release")).append("\n");
         report.append("  SDK 版本: ").append(prop(props, "ro.build.version.sdk")).append("\n");
         report.append("  构建号: ").append(prop(props, "ro.build.display.id")).append("\n");

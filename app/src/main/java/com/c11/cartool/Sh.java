@@ -88,6 +88,8 @@ public final class Sh {
     private static Thread keepAliveThread = null;
     private static volatile boolean keepAliveRunning = false;
     private static volatile long lastAdbStateChange = 0;
+    /** 最近一次加载的 ADB 公钥指纹（断线后诊断仍可显示） */
+    private static volatile String lastKeyFingerprint = "未初始化（连接 ADB 后生成/加载）";
 
     /**
      * 启动 ADB 心跳保活线程（幂等，重复调用无副作用）。
@@ -121,7 +123,9 @@ public final class Sh {
                         Logger.warn(TAG, "心跳检测到断线，自动重连(" + failStreak + "/" + MAX_RECONNECT_ATTEMPTS + ")...");
                         try { adbClient.close(); } catch (Exception ignored) {}
                         adbClient = new AdbClient(adbHost, adbPort);
-                        if (appContext != null) adbClient.initKeys(appContext);
+                        if (appContext != null && adbClient.initKeys(appContext)) {
+                            lastKeyFingerprint = adbClient.keyFingerprint();
+                        }
                         if (adbClient.connect(15000)) {
                             failStreak = 0;
                             lastConnectTime = System.currentTimeMillis();
@@ -159,6 +163,21 @@ public final class Sh {
 
     /** 获取 ADB shell uid（-1=未连接或未知） */
     public static int getAdbUid() { synchronized(adbLock) { return adbUid; } }
+
+    /**
+     * 获取本地 ADB 公钥指纹（同一安装应恒定）。
+     * 诊断报告用它与车机授权弹窗指纹比对：指纹恒定但车机仍每次重弹，即车机端不保存密钥。
+     * 断线后返回最近一次连接缓存的指纹。
+     */
+    public static String getAdbKeyFingerprint() {
+        synchronized (adbLock) {
+            if (adbClient != null) {
+                try { return adbClient.keyFingerprint(); }
+                catch (Exception e) { return "读取失败: " + e.getMessage(); }
+            }
+            return lastKeyFingerprint;
+        }
+    }
 
     /** 获取权限描述文本 */
     public static String getPermissionLabel() {
@@ -207,6 +226,7 @@ public final class Sh {
                 notifyStateChanged();
                 return false;
             }
+            lastKeyFingerprint = adbClient.keyFingerprint();
             adbHost = host;
             adbPort = port;
             boolean ok = adbClient.connect(timeoutMs);
