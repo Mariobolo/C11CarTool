@@ -186,14 +186,21 @@ public final class CarControlExperiment {
                 continue;
             }
 
-            // 弹框确认（同步等待用户选择）
+            // 弹框确认（用 CountDownLatch 替代忙等待）
+            java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
             ConfirmHolder holder = new ConfirmHolder();
             cb.onConfirmRequest(step, new ConfirmListener() {
-                @Override public void onConfirmed() { holder.done = true; holder.skip = false; }
-                @Override public void onSkipped()   { holder.done = true; holder.skip = true; }
+                @Override public void onConfirmed() { holder.skip = false; latch.countDown(); }
+                @Override public void onSkipped()   { holder.skip = true;  latch.countDown(); }
             });
-            while (!holder.done) {
-                try { Thread.sleep(100); } catch (InterruptedException e) { return; }
+            try {
+                if (!latch.await(5, java.util.concurrent.TimeUnit.MINUTES)) {
+                    cb.onStepResult(step, StepResult.SKIPPED, "确认超时（5分钟）");
+                    continue;
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
             }
             if (holder.skip) {
                 cb.onStepResult(step, StepResult.SKIPPED, "用户跳过");
@@ -246,7 +253,6 @@ public final class CarControlExperiment {
 
     /** 简单确认信号量（等待 UI 线程返回用户选择） */
     private static final class ConfirmHolder {
-        volatile boolean done = false;
         volatile boolean skip = false;
     }
 }

@@ -19,7 +19,12 @@ import java.util.Locale;
 public final class CrashHandler implements Thread.UncaughtExceptionHandler {
 
     private static final String TAG = "CrashHandler";
-    private static final String CRASH_DIR = "/sdcard/c11_crash_logs/";
+    // [FIX] 不再硬编码 /sdcard，使用 App 私有外部目录（兼容 Android 10+ 分区存储）
+    private static String crashDir() {
+        java.io.File dir = new java.io.File(Sh.exportDir(), "crash_logs");
+        if (!dir.exists()) dir.mkdirs();
+        return dir.getAbsolutePath();
+    }
 
     private final Context context;
     private final Thread.UncaughtExceptionHandler defaultHandler;
@@ -43,7 +48,7 @@ public final class CrashHandler implements Thread.UncaughtExceptionHandler {
 
             // 记录到 Logger
             Logger.error(TAG, "APP 崩溃: " + ex.getMessage());
-            Logger.error(TAG, "崩溃日志已保存到: " + CRASH_DIR);
+            Logger.error(TAG, "崩溃日志已保存到: " + crashDir());
 
             // 打印堆栈
             StringWriter sw = new StringWriter();
@@ -102,7 +107,8 @@ public final class CrashHandler implements Thread.UncaughtExceptionHandler {
 
     private void saveCrashLog(String crashLog) {
         try {
-            File dir = new File(CRASH_DIR);
+            String dirPath = crashDir();
+            File dir = new File(dirPath);
             if (!dir.exists()) {
                 dir.mkdirs();
             }

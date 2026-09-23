@@ -486,13 +486,10 @@ public final class Sh {
      * 写文件到设备
      */
     public static boolean writeFile(String path, String content) {
-        try {
-            FileWriter fw = new FileWriter(new File(path));
+        try (FileWriter fw = new FileWriter(new File(path))) {
             fw.write(content);
-            fw.close();
             return true;
         } catch (Exception e) {
-            // fallback: 用 shell 写
             Result r = run("echo '" + content.replace("'", "'\\''") + "' > " + path);
             return r.ok();
         }
@@ -505,15 +502,15 @@ public final class Sh {
         try {
             File f = new File(path);
             if (!f.exists()) return "";
-            BufferedReader br = new BufferedReader(new FileReader(f));
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = br.readLine()) != null) {
-                if (sb.length() > 0) sb.append("\n");
-                sb.append(line);
+            try (BufferedReader br = new BufferedReader(new FileReader(f))) {
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = br.readLine()) != null) {
+                    if (sb.length() > 0) sb.append("\n");
+                    sb.append(line);
+                }
+                return sb.toString();
             }
-            br.close();
-            return sb.toString();
         } catch (Exception e) {
             return out("cat " + path);
         }
@@ -523,15 +520,13 @@ public final class Sh {
      * 读取 InputStream 全部内容
      */
     public static String read(InputStream is) {
-        try {
-            BufferedReader r = new BufferedReader(new InputStreamReader(is));
+        try (BufferedReader r = new BufferedReader(new InputStreamReader(is))) {
             StringBuilder sb = new StringBuilder();
             String line;
             while ((line = r.readLine()) != null) {
                 if (sb.length() > 0) sb.append("\n");
                 sb.append(line);
             }
-            r.close();
             return sb.toString();
         } catch (Exception e) { return ""; }
     }

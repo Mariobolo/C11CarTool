@@ -518,16 +518,16 @@ public final class AdbClient {
     }
 
     private static byte[] readFile(File f) throws Exception {
-        FileInputStream fis = new FileInputStream(f);
-        byte[] data = new byte[(int) f.length()];
-        readFully(fis, data);
-        fis.close();
-        return data;
+        try (FileInputStream fis = new FileInputStream(f)) {
+            byte[] data = new byte[(int) f.length()];
+            readFully(fis, data);
+            return data;
+        }
     }
 
     private static void writeFile(File f, byte[] data) throws Exception {
-        FileOutputStream fos = new FileOutputStream(f);
-        fos.write(data);
-        fos.close();
+        try (FileOutputStream fos = new FileOutputStream(f)) {
+            fos.write(data);
+        }
     }
 }
