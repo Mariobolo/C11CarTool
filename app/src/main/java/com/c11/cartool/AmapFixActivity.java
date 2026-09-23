@@ -65,7 +65,7 @@ public class AmapFixActivity extends Activity {
         super.onCreate(savedInstanceState);
         h = new Handler(Looper.getMainLooper());
         setContentView(buildUI());
-        new Thread(this::runDiagnosis).start();
+        Sh.submitAsync(this::runDiagnosis);
     }
 
     private View buildUI() {
@@ -119,32 +119,32 @@ public class AmapFixActivity extends Activity {
         // 修复操作
         content.addView(makeSectionTitle("🛠️ 修复操作"));
         content.addView(makeBtn("🔄 重新诊断", C_BLUE,
-                v -> new Thread(this::runDiagnosis).start()));
+                v -> Sh.submitAsync(this::runDiagnosis)));
         content.addView(makeBtn("✅ 一键修复（推送配置+授权+清数据+重启）", C_GREEN,
-                v -> { if (!running) { running = true; new Thread(this::runOneClickFix).start(); } }));
+                v -> { if (!running) { running = true; Sh.submitAsync(this::runOneClickFix); } }));
         content.addView(makeBtn("📄 仅推送 vsomeip.json 配置", C_CYAN,
-                v -> new Thread(this::deployConfig).start()));
+                v -> Sh.submitAsync(this::deployConfig)));
         content.addView(makeBtn("🔑 仅授予定位权限", C_YELLOW,
-                v -> new Thread(this::grantPermissions).start()));
+                v -> Sh.submitAsync(this::grantPermissions)));
         content.addView(makeBtn("🧹 仅清除地图数据", C_ORANGE,
-                v -> new Thread(() -> {
+                v -> Sh.submitAsync(() -> {
                     log("清除地图数据...");
                     Sh.Result r = Sh.run("pm clear " + AMAP_PKG);
                     log(r.ok() ? "✅ 数据已清除" : "❌ 清除失败: " + r.err);
-                }).start()));
+                })));
         content.addView(makeBtn("🚀 重启高德地图", C_PURPLE,
-                v -> new Thread(() -> {
+                v -> Sh.submitAsync(() -> {
                     log("重启高德地图...");
                     Sh.run("am force-stop " + AMAP_PKG);
                     try { Thread.sleep(500); } catch (Exception e) {}
                     Sh.run("monkey -p " + AMAP_PKG + " -c android.intent.category.LAUNCHER 1");
                     log("✅ 已发送启动命令");
-                }).start()));
+                })));
 
         // 日志工具
         content.addView(makeSectionTitle("📝 日志工具"));
         content.addView(makeBtn("📋 抓取 vsomeip/定位日志 (10秒)", C_BLUE,
-                v -> new Thread(this::captureLogs).start()));
+                v -> Sh.submitAsync(this::captureLogs)));
         content.addView(makeBtn("🗑️ 清空操作日志", C_DIM,
                 v -> logView.setText("")));
 

@@ -149,7 +149,7 @@ public class MainActivity extends Activity {
         setContentView(buildUI());
 
         // 初始化（本地运行模式，不需要 ADB 连接）
-        new Thread(() -> {
+        Sh.submitAsync(() -> {
             DeviceInfo info = DeviceInfo.detect();
             int uid = Sh.getAdbUid();
             String uidLabel;
@@ -166,7 +166,7 @@ public class MainActivity extends Activity {
             Logger.info("运行模式: 车机本地 (uid=" + uid + ")");
             Logger.info("参数: " + VehicleParams.getCount() + " 个");
             Logger.warn("注意: 普通应用权限可能受限，如车控无效请运行诊断模式");
-        }).start();
+        });
 
         // v0.3 修复：Web 服务随 APP 自启（失败不阻塞，首页/设置可手动重试）
         try { startWebAuto(); } catch (Exception e) { Logger.error("Web 自启异常: " + e.getMessage()); }
@@ -182,7 +182,7 @@ public class MainActivity extends Activity {
      * 更新顶部状态栏（uid + 设备 + Android版本）
      */
     private void updateStatusLine() {
-        new Thread(() -> {
+        Sh.submitAsync(() -> {
             int uid = Sh.getAdbUid();
             String uidLabel;
             if (uid == 0) uidLabel = "ROOT";
@@ -199,7 +199,7 @@ public class MainActivity extends Activity {
             h.post(() -> {
                 if (statusLine != null) statusLine.setText(text);
             });
-        }).start();
+        });
     }
 
     // ═══════════════════════════════════════
@@ -405,7 +405,7 @@ public class MainActivity extends Activity {
         if (filter != null) contentArea.addView(buildQuickActions(idx));
 
         contentArea.addView(makeBtn("📖 批量读取本页全部", C_BLUE, v -> {
-            new Thread(() -> {
+            Sh.submitAsync(() -> {
                 long start = System.currentTimeMillis();
                 Logger.info("批量读取 " + params.size() + " 个参数...");
                 for (String[] p : params) {
@@ -414,7 +414,7 @@ public class MainActivity extends Activity {
                 }
                 long elapsed = System.currentTimeMillis() - start;
                 Logger.ok("批量读取完成, 耗时 " + elapsed + "ms");
-            }).start();
+            });
         }));
 
         for (String[] p : params) contentArea.addView(makeParamRow(p));
@@ -444,7 +444,7 @@ public class MainActivity extends Activity {
 
         // 一键诊断
         btnRow.addView(makeSmallBtn("🔧 一键诊断", 0xFF2E7D32, v -> {
-            new Thread(() -> {
+            Sh.submitAsync(() -> {
                 h.post(() -> Logger.title("=== 一键诊断开始 ==="));
                 DiagnosticMode.runFullDiagnostic(new DiagnosticMode.ProgressCallback() {
                     @Override public void onProgress(String message) {
@@ -458,7 +458,7 @@ public class MainActivity extends Activity {
                         });
                     }
                 });
-            }).start();
+            });
         }));
 
         // Web 远程控制
@@ -469,7 +469,7 @@ public class MainActivity extends Activity {
 
         // ADB 连接
         btnRow.addView(makeSmallBtn("📱 连接ADB", 0xFFE65100, v -> {
-            new Thread(() -> {
+            Sh.submitAsync(() -> {
                 h.post(() -> Logger.info("尝试连接本地 ADB..."));
                 boolean ok = Sh.connectLocalAdb();
                 h.post(() -> {
@@ -491,7 +491,7 @@ public class MainActivity extends Activity {
                     }
                     updateStatusLine();
                 });
-            }).start();
+            });
         }));
 
         // 查看日志
@@ -588,7 +588,7 @@ public class MainActivity extends Activity {
     private void buildLogTab() {
         contentArea.addView(makeSectionTitle("🔬 诊断模式"));
         contentArea.addView(makeBtn("🧪 运行完整诊断（检查权限/命令/广播/logcat）", C_ORANGE, v -> {
-            new Thread(() -> {
+            Sh.submitAsync(() -> {
                 Logger.title("开始运行诊断...");
                 DiagnosticMode.runFullDiagnostic(new DiagnosticMode.ProgressCallback() {
                     @Override
@@ -608,24 +608,24 @@ public class MainActivity extends Activity {
                         });
                     }
                 });
-            }).start();
+            });
         }));
 
         contentArea.addView(makeSectionTitle("📋 日志工具"));
 
         contentArea.addView(makeBtn("📖 读取 logcat (最近50行)", C_BLUE, v -> {
-            new Thread(() -> {
+            Sh.submitAsync(() -> {
                 String log = VehicleControl.getLogcat(50);
                 Logger.info("logcat:\n" + log);
-            }).start();
+            });
         }));
 
         contentArea.addView(makeBtn("🗑 清除 logcat", C_RED, v -> { VehicleControl.clearLogcat(); Logger.ok("logcat 已清除"); }));
         contentArea.addView(makeBtn("📖 读取全部 leap.* 属性", C_GREEN, v -> {
-            new Thread(() -> { String all = VehicleControl.getAllLeapProps(); Logger.info("leap.*:\n" + all); showResultDialog("leap.*", all); }).start();
+            Sh.submitAsync(() -> { String all = VehicleControl.getAllLeapProps(); Logger.info("leap.*:\n" + all); showResultDialog("leap.*", all); });
         }));
         contentArea.addView(makeBtn("📖 读取全部 strCar* 设置", C_GREEN, v -> {
-            new Thread(() -> { String all = VehicleControl.getAllCarSettings(); Logger.info("strCar*:\n" + all); showResultDialog("strCar*", all); }).start();
+            Sh.submitAsync(() -> { String all = VehicleControl.getAllCarSettings(); Logger.info("strCar*:\n" + all); showResultDialog("strCar*", all); });
         }));
 
         contentArea.addView(makeSectionTitle("📤 日志导出"));
@@ -712,7 +712,7 @@ public class MainActivity extends Activity {
         connRow.setOrientation(LinearLayout.HORIZONTAL);
         connRow.setPadding(0, 4, 0, 4);
         connRow.addView(makeSmallBtn("🔌 连接本地 adbd", C_GREEN, v -> {
-            new Thread(() -> {
+            Sh.submitAsync(() -> {
                 Logger.info("正在连接本地 adbd (127.0.0.1:5555)...");
                 boolean ok = Sh.connectLocalAdb();
                 h.post(() -> {
@@ -725,7 +725,7 @@ public class MainActivity extends Activity {
                     }
                     switchTab(TAB_NAMES.length - 1);
                 });
-            }).start();
+            });
         }));
         connRow.addView(makeSmallBtn("🔌 断开", C_RED, v -> {
             Sh.disconnectAdb();
@@ -770,26 +770,26 @@ public class MainActivity extends Activity {
             final int p = port;
             adbHost = host; adbPort = p;
             prefs.edit().putString("adb_host", host).putInt("adb_port", p).apply();
-            new Thread(() -> {
+            Sh.submitAsync(() -> {
                 boolean ok = Sh.connectAdb(host, p, 5000);
                 h.post(() -> {
                     Logger.ok(ok ? "ADB 连接成功" : "ADB 连接失败");
                     if (ok) autoGrantPermissions();
                     switchTab(TAB_NAMES.length - 1);
                 });
-            }).start();
+            });
         }));
         contentArea.addView(addrRow);
 
         // 测试 ADB 命令
         contentArea.addView(makeBtn("🧪 测试 ADB 连接 (执行 id 命令)", C_CYAN, v -> {
-            new Thread(() -> {
+            Sh.submitAsync(() -> {
                 Sh.Result r = Sh.run("id");
                 h.post(() -> {
                     Logger.info("ADB 测试结果:\n" + r.toDiagnosticString());
                     showResultDialog("ADB 测试", r.toDiagnosticString());
                 });
-            }).start();
+            });
         }));
 
         // ═══ Web 远程控制 ═══
@@ -982,7 +982,7 @@ public class MainActivity extends Activity {
 
         // 查看当前 WiFi ADB 状态
         contentArea.addView(makeBtn("📊 查看 WiFi ADB 状态", C_BLUE, v -> {
-            new Thread(() -> {
+            Sh.submitAsync(() -> {
                 String result = Sh.out("getprop persist.sys.leap.wifiadb");
                 String status = (result != null && result.trim().equals("1")) ? "✅ 已开启" : "❌ 未开启";
                 h.post(() -> showResultDialog("WiFi ADB 状态",
@@ -990,7 +990,7 @@ public class MainActivity extends Activity {
                         "状态: " + status + "\n\n" +
                         "如果已开启，可以通过以下命令连接:\n" +
                         "adb connect <车机IP>:5555"));
-            }).start();
+            });
         }));
 
         // 扩展工具
@@ -1090,7 +1090,7 @@ public class MainActivity extends Activity {
 
         // 📖 读取
         line2.addView(makeSmallBtn("📖", C_BLUE, v -> {
-            new Thread(() -> {
+            Sh.submitAsync(() -> {
                 long t = System.currentTimeMillis();
                 Sh.Result r = VehicleControl.getWithResult(key, ns);
                 long ms = System.currentTimeMillis() - t;
@@ -1110,13 +1110,13 @@ public class MainActivity extends Activity {
                 if (!r.ok()) {
                     Logger.warn("读取失败详情: " + r.toDiagnosticString());
                 }
-            }).start();
+            });
         }));
 
         // ON / OFF
         if (type.equals("bool") || type.equals("int")) {
             line2.addView(makeSmallBtn("ON", C_GREEN, v -> {
-                new Thread(() -> {
+                Sh.submitAsync(() -> {
                     long t = System.currentTimeMillis();
                     if (tryBroadcastControl(key, true)) {
                         h.post(() -> { valTv.setText("1"); valTv.setTextColor(C_GREEN); });
@@ -1127,10 +1127,10 @@ public class MainActivity extends Activity {
                         h.post(() -> { valTv.setText("1"); valTv.setTextColor(C_GREEN); });
                     }
                     Logger.ok(name + " → ON (" + (System.currentTimeMillis() - t) + "ms)");
-                }).start();
+                });
             }));
             line2.addView(makeSmallBtn("OFF", C_RED, v -> {
-                new Thread(() -> {
+                Sh.submitAsync(() -> {
                     long t = System.currentTimeMillis();
                     if (tryBroadcastControl(key, false)) {
                         h.post(() -> { valTv.setText("0"); valTv.setTextColor(C_RED); });
@@ -1141,7 +1141,7 @@ public class MainActivity extends Activity {
                         h.post(() -> { valTv.setText("0"); valTv.setTextColor(C_RED); });
                     }
                     Logger.ok(name + " → OFF (" + (System.currentTimeMillis() - t) + "ms)");
-                }).start();
+                });
             }));
         }
 
@@ -1149,7 +1149,7 @@ public class MainActivity extends Activity {
         line2.addView(makeSmallBtn("SET", C_ORANGE, v -> {
             String val = et.getText().toString().trim();
             if (val.isEmpty()) { Logger.warn("请输入值"); return; }
-            new Thread(() -> {
+            Sh.submitAsync(() -> {
                 long t = System.currentTimeMillis();
                 if ("shell".equals(ns)) {
                     String out = Sh.out(val);
@@ -1164,7 +1164,7 @@ public class MainActivity extends Activity {
                     h.post(() -> valTv.setText(val));
                     Logger.ok(name + " → " + val + " (" + (System.currentTimeMillis() - t) + "ms)");
                 }
-            }).start();
+            });
         }));
 
         row.addView(line2);
@@ -1205,7 +1205,7 @@ public class MainActivity extends Activity {
      * 通过 adb shell pm grant 命令
      */
     private void autoGrantPermissions() {
-        new Thread(() -> {
+        Sh.submitAsync(() -> {
             Logger.info("正在自动授权...");
             String packageName = getPackageName();
 
@@ -1234,7 +1234,7 @@ public class MainActivity extends Activity {
             }
 
             Logger.ok("自动授权完成");
-        }).start();
+        });
     }
 
     // ═══════════════════════════════════════
@@ -1242,7 +1242,7 @@ public class MainActivity extends Activity {
     // ═══════════════════════════════════════
 
     private void exportLogs() {
-        new Thread(() -> {
+        Sh.submitAsync(() -> {
             StringBuilder sb = new StringBuilder();
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
             sb.append("# C11 车控测试 日志导出\n");
@@ -1265,20 +1265,20 @@ public class MainActivity extends Activity {
                 boolean ok = Sh.writeFile("/sdcard/" + filename, sb.toString());
                 Logger.ok(ok ? "日志已导出: /sdcard/" + filename : "导出失败: " + e.getMessage());
             }
-        }).start();
+        });
     }
 
     private void exportLogcat() {
-        new Thread(() -> {
+        Sh.submitAsync(() -> {
             String logcat = VehicleControl.getLogcat(200);
             String filename = "c11_logcat_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date()) + ".txt";
             boolean ok = Sh.writeFile("/sdcard/" + filename, logcat);
             Logger.ok(ok ? "logcat 已导出: /sdcard/" + filename : "导出失败");
-        }).start();
+        });
     }
 
     private void exportSnapshot() {
-        new Thread(() -> {
+        Sh.submitAsync(() -> {
             StringBuilder sb = new StringBuilder();
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
             sb.append("# C11 参数快照\n");
@@ -1295,11 +1295,11 @@ public class MainActivity extends Activity {
             String filename = "c11_snapshot_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date()) + ".txt";
             boolean written = Sh.writeFile("/sdcard/" + filename, sb.toString());
             Logger.ok(written ? "快照已导出: /sdcard/" + filename + " (" + ok + " 有值)" : "导出失败");
-        }).start();
+        });
     }
 
     private void importSnapshot() {
-        new Thread(() -> {
+        Sh.submitAsync(() -> {
             String content = Sh.readFile("/sdcard/c11_snapshot_latest.txt");
             if (content.isEmpty()) {
                 Logger.warn("未找到快照文件: /sdcard/c11_snapshot_latest.txt");
@@ -1324,7 +1324,7 @@ public class MainActivity extends Activity {
                 }
             }
             Logger.ok("已导入 " + imported + " 个参数");
-        }).start();
+        });
     }
 
     // ═══════════════════════════════════════
@@ -1422,11 +1422,11 @@ public class MainActivity extends Activity {
         row.addView(makeSmallBtn("SET", C_BLUE, v -> {
             String val = et.getText().toString().trim();
             if (val.isEmpty()) return;
-            new Thread(() -> {
+            Sh.submitAsync(() -> {
                 if ("shell".equals(ns)) { String out = Sh.out(val); Logger.cmd(val, out); h.post(() -> showResultDialog("Shell", out)); }
                 else if ("prop".equals(ns)) { String out = Sh.out("getprop " + val); Logger.info("getprop " + val + " = " + out); h.post(() -> showResultDialog("getprop", out)); }
                 else { String out = Sh.out("settings get global " + val); Logger.info("settings " + val + " = " + out); h.post(() -> showResultDialog("settings", out)); }
-            }).start();
+            });
         }));
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1449,7 +1449,7 @@ public class MainActivity extends Activity {
         polling = !polling;
         if (polling) {
             Logger.info("开始轮询 logcat (每3秒)");
-            new Thread(() -> {
+            Sh.submitAsync(() -> {
                 while (polling) {
                     String log = VehicleControl.pollLogcat();
                     if (!log.isEmpty()) {
@@ -1460,7 +1460,7 @@ public class MainActivity extends Activity {
                     }
                     try { Thread.sleep(3000); } catch (Exception ignored) {}
                 }
-            }).start();
+            });
         } else {
             Logger.info("停止轮询");
         }
@@ -1500,10 +1500,10 @@ public class MainActivity extends Activity {
         if (ok) {
             Logger.ok("Web 服务已自启: " + webUrl());
             lastQrUrl = null; // 强制刷新二维码
-            new Thread(() -> {
+            Sh.submitAsync(() -> {
                 boolean st = webServer.selfTest();
                 h.post(() -> Logger.info("Web 本机自检(127.0.0.1): " + (st ? "✅ 通过" : "❌ 失败")));
-            }).start();
+            });
         } else {
             Logger.error("Web 服务自启失败（8080~8100 均不可用？），请手动启动");
             webServer = null;
@@ -1583,10 +1583,10 @@ public class MainActivity extends Activity {
         LinearLayout adbRow = new LinearLayout(this);
         adbRow.setOrientation(LinearLayout.HORIZONTAL);
         adbRow.addView(makeBtnL("🔌 连接", C_GREEN, v -> {
-            new Thread(() -> {
+            Sh.submitAsync(() -> {
                 boolean ok = Sh.connectLocalAdb();
                 h.post(() -> Logger.ok(ok ? "ADB 连接成功（心跳保活已接管）" : "ADB 连接失败，请确认 WiFi ADB 已开启"));
-            }).start();
+            });
         }));
         adbRow.addView(makeBtnL("🔌 断开", C_RED, v -> Sh.disconnectAdb()));
         contentArea.addView(adbRow);
@@ -1635,7 +1635,7 @@ public class MainActivity extends Activity {
         // ── 卡片 3：一键诊断 ──
         contentArea.addView(makeSectionTitle("🔧 一键诊断"));
         contentArea.addView(makeBtn("🧪 运行完整诊断（15项检查 + 报告导出）", C_ORANGE, v -> {
-            new Thread(() -> {
+            Sh.submitAsync(() -> {
                 h.post(() -> Logger.title("=== 一键诊断开始 ==="));
                 DiagnosticMode.runFullDiagnostic(new DiagnosticMode.ProgressCallback() {
                     @Override public void onProgress(String message) { h.post(() -> Logger.info(message)); }
@@ -1647,7 +1647,7 @@ public class MainActivity extends Activity {
                         });
                     }
                 });
-            }).start();
+            });
         }));
 
         // ── 卡片 4：车控实验 ──
@@ -1766,10 +1766,10 @@ public class MainActivity extends Activity {
         contentArea.addView(makeSectionTitle("🧪 顺序实验（逐项确认）"));
         contentArea.addView(makeBtn("🚀 启动顺序实验（每步确认 + 自动判定）", 0xFF9C27B0, v -> runCarExperiment()));
         contentArea.addView(makeBtn("🔌 未连接 ADB？点此连接", C_ORANGE, v -> {
-            new Thread(() -> {
+            Sh.submitAsync(() -> {
                 boolean ok = Sh.connectLocalAdb();
                 h.post(() -> Logger.ok(ok ? "ADB 已连接" : "ADB 连接失败，请确认 WiFi ADB 已开启"));
-            }).start();
+            });
         }));
 
         // 状态提示
@@ -1865,7 +1865,7 @@ public class MainActivity extends Activity {
         // 一键全测
         contentArea.addView(makeSectionTitle("🧪 一键全测"));
         contentArea.addView(makeBtn("⚡ 快速全测（不确认，间隔1秒，仅供熟悉通道）", 0xFF6D4C41, v -> {
-            new Thread(() -> runAllCarControls()).start();
+            Sh.submitAsync(() -> runAllCarControls()).start();
         }));
     }
 
@@ -1873,7 +1873,7 @@ public class MainActivity extends Activity {
     private int acFan = 3;
 
     private void runCarAction(String action) {
-        new Thread(() -> {
+        Sh.submitAsync(() -> {
             try {
                 boolean ok = false;
                 switch (action) {
@@ -1913,7 +1913,7 @@ public class MainActivity extends Activity {
             } catch (Exception e) {
                 Logger.error("CarCtrl", action + " 异常: " + e.getMessage());
             }
-        }).start();
+        });
     }
 
     private void runAllCarControls() {

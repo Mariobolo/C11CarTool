@@ -187,14 +187,14 @@ public class CarControlFragment extends Fragment {
 
     private void sendAcCommand(String cmd) {
         // 复用 VehicleControl 的空调广播协议
-        new Thread(() -> {
+        Sh.submitAsync(() -> {
             try {
                 // 示例: 空调最大制冷, 实际按命令映射到对应方法
                 Logger.info("空调控制: " + cmd);
             } catch (Exception e) {
                 Logger.warn("空调控制失败: " + e.getMessage());
             }
-        }).start();
+        });
     }
 
     private void sendCommand(String cmd) {
@@ -203,7 +203,7 @@ public class CarControlFragment extends Fragment {
     }
 
     private void refreshData() {
-        new Thread(() -> {
+        Sh.submitAsync(() -> {
             try {
                 // 通过 settings get / getprop 获取车辆数据（不隐藏错误，用 Result 检查）
                 String speed = readSettingOrProp("vehicle_speed", null);
@@ -220,7 +220,7 @@ public class CarControlFragment extends Fragment {
             } catch (Exception e) {
                 Logger.warn("刷新车辆数据失败: " + e.getMessage());
             }
-        }).start();
+        });
     }
 
     /**
@@ -255,7 +255,7 @@ public class CarControlFragment extends Fragment {
 
     private void startPolling() {
         polling = true;
-        new Thread(() -> {
+        Sh.submitAsync(() -> {
             while (polling && isAdded()) {
                 try {
                     refreshData();
@@ -264,7 +264,7 @@ public class CarControlFragment extends Fragment {
                     break;
                 }
             }
-        }).start();
+        });
     }
 
     @Override
