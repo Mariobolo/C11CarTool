@@ -14,6 +14,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.ViewSwitcher;
 
 import com.c11.cartool.AppInfo;
 import com.c11.cartool.CrashHandler;
@@ -46,6 +47,11 @@ public class DashboardActivity extends Activity {
     private WebServer webServer;
     private DashboardRepository repository;
     private DashboardSnapshot lastSnap = new DashboardSnapshot();
+
+    // 内容区两页：仪表盘网格 / 全车信号清单
+    private ViewSwitcher contentSwitcher;
+    private SignalListPage signalPage;
+    private TextView signalChip;
     private ExecutorService controlPool = Executors.newSingleThreadExecutor();
 
     // 状态条
@@ -108,10 +114,22 @@ public class DashboardActivity extends Activity {
 
         root.addView(buildStatusBar());
 
+        // 内容区：ViewSwitcher 在「仪表盘网格」与「全车信号清单」两页间切换
+        contentSwitcher = new ViewSwitcher(this);
+        contentSwitcher.setInAnimation(this, android.R.anim.fade_in);
+        contentSwitcher.setOutAnimation(this, android.R.anim.fade_out);
+
         DashboardGridView grid = new DashboardGridView(this, 12, rows(), marginDp(), gapDp());
-        root.addView(grid, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        contentSwitcher.addView(grid, new ViewSwitcher.LayoutParams(
+                ViewSwitcher.LayoutParams.MATCH_PARENT, ViewSwitcher.LayoutParams.MATCH_PARENT));
         buildGridCards(grid);
+
+        signalPage = new SignalListPage(this);
+        contentSwitcher.addView(signalPage, new ViewSwitcher.LayoutParams(
+                ViewSwitcher.LayoutParams.MATCH_PARENT, ViewSwitcher.LayoutParams.MATCH_PARENT));
+
+        root.addView(contentSwitcher, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
         root.addView(buildDock());
 
@@ -164,6 +182,11 @@ public class DashboardActivity extends Activity {
         webView.setOnClickListener(v -> showWebInfoDialog(false));
         bar.addView(webView, chipLp());
 
+        // 全车信号清单（点击切换整页）
+        signalChip = chip("📊 信号", DashboardTheme.CYAN);
+        signalChip.setOnClickListener(v -> toggleSignalPage());
+        bar.addView(signalChip, chipLp());
+
         // 时间
         timeView = new TextView(this);
         timeView.setTextColor(DashboardTheme.TEXT);
@@ -178,6 +201,13 @@ public class DashboardActivity extends Activity {
         bar.addView(eng, chipLp());
 
         return bar;
+    }
+
+    /** 在仪表盘网格与全车信号清单之间切换，chip 文案随页变化。 */
+    private void toggleSignalPage() {
+        boolean toList = contentSwitcher.getDisplayedChild() == 0;
+        contentSwitcher.setDisplayedChild(toList ? 1 : 0);
+        signalChip.setText(toList ? "← 仪表盘" : "📊 信号");
     }
 
     private TextView chip(String text, int color) {
@@ -501,6 +531,8 @@ public class DashboardActivity extends Activity {
 
     private void onSnapshot(DashboardSnapshot snap) {
         lastSnap = snap;
+        // 信号清单页不依赖卡片挂载，首帧即可填充
+        if (signalPage != null) signalPage.setRows(snap.rows);
         // 视图尚未挂载时跳过本轮（卡片 buildContent 未完成），下一轮 5s 后自动补上
         if (batteryCard == null || !batteryCard.isAttachedToWindow()) return;
 

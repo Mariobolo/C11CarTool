@@ -56,5 +56,9 @@ public class DashboardSnapshot {
     public volatile boolean settingsOk = false;
     public volatile boolean logcatOk = false;
 
+    /** 全车信号清单（分组、多渠道标注，每轮采集重新组装，供信号清单页渲染）。 */
+    public final java.util.ArrayList<SignalRow> rows =
+            new java.util.ArrayList<SignalRow>();
+
     public boolean hasTs() { return ts > 0; }
 }

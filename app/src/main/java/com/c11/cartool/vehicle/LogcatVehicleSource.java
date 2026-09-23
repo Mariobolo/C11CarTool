@@ -14,10 +14,12 @@ import java.util.regex.Pattern;
  * 本类只做纯文本解析，不依赖 Android API / 网络，便于离线与单元测试。
  *
  * 覆盖数据源：
- *   C11CarSomeIp  —— SomeIP 实时事件（"onMessage eventId: X value: Y" 或 "eventid: X msg:Y"）
- *   C11CarXml     —— 车辆状态 XML 字段（"node_name:field setTextContent:value"）
+ *   C11CarSomeIp / C11AirConditioner —— SomeIP 实时事件（"eventId: X value: Y"，
+ *       无论前后是否带 serviceId / instanceId 均能识别）
+ *   C11CarXml / C11AirConditioner —— 车辆状态 XML/节点字段（"node_name:field setTextContent:value"）
  *   zza/TPMSBean  —— 胎压胎温
  *   LocationDataC23Handler —— GPS 经纬度/航向
+ *   EnergyDataBinder —— 行程里程 / 行驶时间 / 平均能耗
  *
  * 设计原则：只报告日志里真实出现过的值，绝不回填默认值；识别不了的 eventId/字段
  * 一律列入"未识别"清单带回，用于离线补全映射，不臆测含义。
@@ -73,7 +75,8 @@ public final class LogcatVehicleSource {
         // 档位（管家配置验证：1=R,2=N,3=D；P 可能为 0，存疑不臆造）
         enu(1110, "档位", G_DRIVE, enums(1, "R", 2, "N", 3, "D"));
         num(1108, "车速", "km/h", G_DRIVE);
-        enu(11166, "制动踏板", G_DRIVE, enums(0, "松开", 1, "轻踩", 2, "深踩"));
+        // 制动踏板：实测为连续开度值（如 34.0），非早期规范猜测的 0/1/2 枚举
+        num(11166, "制动踏板开度", "%", G_DRIVE);
         enu(11201, "驾驶模式", G_DRIVE, enums(1, "舒适", 4, "运动", 6, "自定义"));
 
         // 车门（管家配置验证，已纠正早期错误映射）
@@ -113,6 +116,7 @@ public final class LogcatVehicleSource {
         enu(28107, "后除霜", G_HVAC, enums(0, "关", 1, "开"));
         num(28110, "左区温度", "°C", G_HVAC);
         num(28111, "右区温度", "°C", G_HVAC);
+        enu(28156, "座椅通风自动", G_HVAC, enums(0, "关", 1, "开"));
         enu(28157, "同步模式", G_HVAC, enums(0, "关", 1, "开"));
 
         // 系统 / 充电
@@ -122,7 +126,7 @@ public final class LogcatVehicleSource {
         enu(18100, "驱动模式", G_DRIVE, enums(1, "标准", 4, "运动"));
     }
 
-    /** C11CarXml 字段名 → 中文名（规范 5.3）。 */
+    /** C11CarXml / C11AirConditioner 节点字段名 → 中文名（规范 5.3 + 日志实测）。 */
     private static final Map<String, String> XML_FIELDS = new LinkedHashMap<String, String>();
     static {
         XML_FIELDS.put("speed", "车速(km/h)");
@@ -151,14 +155,25 @@ public final class LogcatVehicleSource {
         XML_FIELDS.put("CMSrfDoor", "右前门");
         XML_FIELDS.put("Volume", "音量");
         XML_FIELDS.put("Close", "近光灯(0=开,1=关)");
+        // 座椅通风（C11AirConditioner 节点，日志实测）
+        XML_FIELDS.put("LeftSeatVentilation", "左座椅通风");
+        XML_FIELDS.put("RightSeatVentilation", "右座椅通风");
+        XML_FIELDS.put("seatVentAuto", "座椅通风自动");
+        XML_FIELDS.put("optionSeatVentilation", "座椅通风选项");
+        XML_FIELDS.put("optionSeatVentilation02", "座椅通风选项2");
     }
 
     private static final String[] TIRE_POS = {"左前", "右前", "左后", "右后"};
 
     // ───────────────────────── 正则 ─────────────────────────
 
-    private static final Pattern RE_ONMSG = Pattern.compile(
-            "onMessage\\s+eventId\\s*:?\\s*(\\d+)\\s+value\\s*:?\\s*(-?\\d+(?:\\.\\d+)?)",
+    /**
+     * SomeIP 事件：eventId 与 value 相邻即可，兼容两种写法：
+     *   "onMessage eventId: X value: Y"（C11CarSomeIp）
+     *   "onMessage serviceId: .. instanceId: .. eventId: X value: Y"（C11AirConditioner）
+     */
+    private static final Pattern RE_EVENT = Pattern.compile(
+            "eventId\\s*:?\\s*(\\d+)\\s+value\\s*:?\\s*(-?\\d+(?:\\.\\d+)?)",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern RE_EVENTID_MSG = Pattern.compile(
             "eventid\\s*:?\\s*(\\d+)\\s+msg\\s*:?\\s*(-?\\d+(?:\\.\\d+)?)",
@@ -170,6 +185,9 @@ public final class LogcatVehicleSource {
             "TPMSBean\\{pos=(\\d+),.*?singleTirePress=(\\d+),.*?singleTireTemp=(\\d+)");
     private static final Pattern RE_GPS = Pattern.compile(
             "D:\\(([\\d.]+)\\s+([\\d.]+)\\s+([\\d.]+)\\)\\s+course:([\\d.]+)\\s+tickTime:(\\d+)\\s+status:(\\w)");
+    /** EnergyDataBinder：行程里程 / 时间 / 平均能耗（三段连写，无分隔符）。 */
+    private static final Pattern RE_ENERGY = Pattern.compile(
+            "updateEnergyData:\\s*EV_MILE:\\s*([\\d.]+)\\s*EV_TIME:\\s*(\\d+)\\s*EV_AVERAGE_CONSUME:\\s*([\\d.]+)");
 
     // ───────────────────────── 解析结果 ─────────────────────────
 
@@ -183,9 +201,11 @@ public final class LogcatVehicleSource {
         public final Map<String, State> xmlStates = new LinkedHashMap<String, State>();
         public final Map<Integer, State> tireStates = new TreeMap<Integer, State>();
         public final State gps = new State();
+        /** EnergyDataBinder 行程三件套（空串=本轮未出现，不填默认值）。 */
+        public String tripMile = "", tripTime = "", tripConsume = "";
         public final ArrayList<Integer> unknownEvents = new ArrayList<Integer>();
         public final ArrayList<String> unknownXml = new ArrayList<String>();
-        public int someipLines, xmlLines, tpmsLines, gpsLines;
+        public int someipLines, xmlLines, tpmsLines, gpsLines, energyLines;
         public int totalLines;
     }
 
@@ -198,16 +218,24 @@ public final class LogcatVehicleSource {
             if (line.isEmpty()) continue;
             r.totalLines++;
 
-            Matcher m = RE_ONMSG.matcher(line);
+            Matcher m = RE_EVENT.matcher(line);
             if (m.find()) {
                 r.someipLines++;
-                putEvent(r, Integer.parseInt(m.group(1)), m.group(2), "onMessage");
+                putEvent(r, Integer.parseInt(m.group(1)), m.group(2), "eventId");
                 continue;
             }
             m = RE_EVENTID_MSG.matcher(line);
             if (m.find() && (line.contains("C11CarSomeIp") || line.contains("Someip") || line.contains("onMessage"))) {
                 r.someipLines++;
                 putEvent(r, Integer.parseInt(m.group(1)), m.group(2), "eventid");
+                continue;
+            }
+            m = RE_ENERGY.matcher(line);
+            if (m.find()) {
+                r.energyLines++;
+                r.tripMile = m.group(1);
+                r.tripTime = m.group(2);
+                r.tripConsume = m.group(3);
                 continue;
             }
             m = RE_TPMS.matcher(line);
@@ -240,7 +268,7 @@ public final class LogcatVehicleSource {
                 continue;
             }
             m = RE_XML.matcher(line);
-            if (m.find() && line.contains("C11CarXml")) {
+            if (m.find() && (line.contains("C11CarXml") || line.contains("C11AirConditioner"))) {
                 r.xmlLines++;
                 String field = m.group(1);
                 String val = m.group(2).trim();
@@ -249,7 +277,7 @@ public final class LogcatVehicleSource {
                     s = new State();
                     String cn = XML_FIELDS.get(field);
                     s.name = cn != null ? cn : field;
-                    s.source = "C11CarXml";
+                    s.source = "node";
                     r.xmlStates.put(field, s);
                     if (cn == null && !r.unknownXml.contains(field)) r.unknownXml.add(field);
                 }
@@ -267,7 +295,7 @@ public final class LogcatVehicleSource {
             s = new State();
             s.name = def != null ? def.name : ("eventId " + id);
             s.unit = def != null ? def.unit : "";
-            s.source = "C11CarSomeIp/" + source;
+            s.source = "SomeIP/" + source;
             r.eventStates.put(id, s);
             if (def == null && !r.unknownEvents.contains(id)) r.unknownEvents.add(id);
         }
@@ -286,6 +314,18 @@ public final class LogcatVehicleSource {
         try { return Integer.parseInt(s.trim()); } catch (Exception e) { return dft; }
     }
 
+    /** eventId 的分组（未配置返回 ""，供外部组装信号清单）。 */
+    public static String groupOfEvent(int id) {
+        Sig d = EVENTS.get(id);
+        return d == null ? "" : d.group;
+    }
+
+    /** eventId 的单位（未配置或无单位返回 ""）。 */
+    public static String unitOfEvent(int id) {
+        Sig d = EVENTS.get(id);
+        return d == null || d.unit == null ? "" : d.unit;
+    }
+
     // ───────────────────────── 报告 ─────────────────────────
 
     /** 生成可直接放进一键全测报告的中文状态文本。 */
@@ -293,8 +333,9 @@ public final class LogcatVehicleSource {
         Result r = parse(logcat);
         StringBuilder sb = new StringBuilder(4096);
         sb.append("  采集: 共 ").append(r.totalLines).append(" 行；SomeIP 事件 ")
-          .append(r.someipLines).append(" 条，XML 字段 ").append(r.xmlLines)
-          .append(" 条，胎压 ").append(r.tpmsLines).append(" 条，GPS ").append(r.gpsLines).append(" 条\n");
+          .append(r.someipLines).append(" 条，XML/节点字段 ").append(r.xmlLines)
+          .append(" 条，胎压 ").append(r.tpmsLines).append(" 条，GPS ").append(r.gpsLines)
+          .append(" 条，行程 ").append(r.energyLines).append(" 条\n");
 
         // 按分组输出已识别事件
         String[] groups = {"动力/底盘", "车门/车锁/车窗", "灯光", "空调", "系统/能耗", "充电"};
@@ -321,8 +362,15 @@ public final class LogcatVehicleSource {
               .append("（").append(r.gps.count).append(" 次）\n");
         }
 
+        if (!r.tripMile.isEmpty()) {
+            sb.append("  ── 行程（EnergyDataBinder）──\n")
+              .append("    自启动里程= ").append(r.tripMile).append(" km\n")
+              .append("    自启动时间= ").append(r.tripTime).append(" min\n")
+              .append("    平均能耗= ").append(r.tripConsume).append(" kWh/100km\n");
+        }
+
         if (!r.xmlStates.isEmpty()) {
-            sb.append("  ── C11CarXml 状态快照 ──\n");
+            sb.append("  ── XML/节点 状态快照 ──\n");
             for (State s : r.xmlStates.values())
                 sb.append("    ").append(pad(s.name, 14)).append("= ").append(s.raw).append('\n');
         }
@@ -337,7 +385,7 @@ public final class LogcatVehicleSource {
             sb.append('\n');
         }
         if (!r.unknownXml.isEmpty()) {
-            sb.append("  ── 未识别 XML 字段 ──\n    ").append(r.unknownXml.toString()).append('\n');
+            sb.append("  ── 未识别 XML/节点字段 ──\n    ").append(r.unknownXml.toString()).append('\n');
         }
         if (r.someipLines == 0 && r.xmlLines == 0) {
             sb.append("  ⚠️ 未解析到车辆信号：可能缓冲已被刷掉，请先做几个车控动作后再跑一次，")

@@ -24,8 +24,12 @@ public class DashboardRepository {
     private static final String TAG = "DashRepo";
     private static final long INTERVAL_MS = 5000;
 
+    /** 仪表盘每轮抓取的 TAG（与一键全测核心集对齐，去掉无车辆数据的 Wallpaper）。 */
     private static final String[] LOG_TAGS = {
-            "C11CarSomeIp", "C11CarXml", "zza", "LocationDataC23Handler", "C11SmartContrl"
+            "C11CarSomeIp", "C11CarXml", "C11AirConditioner", "zza",
+            "EnergyDataBinder", "CarControl", "C11CarConf",
+            "LocationDataC23Handler", "SomeipSub", "GearMonitorService",
+            "UnifiedVehicleDataSvc", "C11SmartContrl"
     };
 
     private static final java.util.regex.Pattern TEMP_RE =
@@ -94,10 +98,11 @@ public class DashboardRepository {
         snap.adbConnected = true;
         snap.adbUid = Sh.getAdbUid();
 
-        // ── settings list global：一次命令，Java 端解析 ──
+        // ── settings list global：一次命令，Java 端解析 �─
+        java.util.ArrayList<SignalRow> settingsRows = new java.util.ArrayList<SignalRow>();
         Sh.Result s = Sh.run("settings list global", 10000);
         if (s.ok() && s.out != null) {
-            parseSettings(s.out, snap);
+            parseSettings(s.out, snap, settingsRows);
             snap.settingsOk = true;
         } else {
             Logger.warn(TAG, "settings list global 失败: " + (s.err == null ? "" : s.err));
@@ -107,8 +112,9 @@ public class DashboardRepository {
         // ── logcat：核心 TAG 一次性拉取解析 ──
         String tags = join(" ", LOG_TAGS);
         Sh.Result l = Sh.run("logcat -d -v brief -s " + tags, 10000);
+        LogcatVehicleSource.Result pr = null;
         if (l.ok() && l.out != null && !l.out.trim().isEmpty()) {
-            LogcatVehicleSource.Result pr = LogcatVehicleSource.parse(l.out);
+            pr = LogcatVehicleSource.parse(l.out);
             parseLogcat(pr, snap);
             snap.logcatOk = true;
         } else {
@@ -116,11 +122,15 @@ public class DashboardRepository {
             snap.logcatOk = false;
         }
 
+        // ── 组装全车信号清单（settings / event / node / TPMS / GPS / 行程，多渠道并列）──
+        buildRows(snap, settingsRows, pr);
+
         deliver(snap);
     }
 
-    /** settings list global 输出 "key=value" 逐行解析（白名单） */
-    private void parseSettings(String text, DashboardSnapshot snap) {
+    /** settings list global 输出 "key=value" 逐行解析（白名单），同时收集 settings 渠道信号行。 */
+    private void parseSettings(String text, DashboardSnapshot snap,
+                               java.util.ArrayList<SignalRow> settingsRows) {
         for (String line : text.split("\n")) {
             String t = line.trim();
             if (t.isEmpty() || !t.contains("=")) continue;
@@ -152,7 +162,140 @@ public class DashboardRepository {
                 case "C11_CALL":            snap.callVol = iv; break;
                 default: break;
             }
+
+            String[] meta = SETTINGS_META.get(key);
+            if (meta != null) {
+                settingsRows.add(new SignalRow(
+                        meta[0], meta[1], formatSettings(meta[2], key, iv),
+                        "settings/" + key));
+            }
         }
+    }
+
+    // ─────────────── 信号清单组装（多渠道并列 + 分组排序）───────────────
+
+    /** settings 键元数据：{分组, 中文名, 类型(switch/temp/fan/vol/pm)}。 */
+    private static final java.util.LinkedHashMap<String, String[]> SETTINGS_META =
+            new java.util.LinkedHashMap<String, String[]>();
+    static {
+        Object[][] m = {
+            {"strCarAirSwitch",     "空调", "空调开关", "switch"},
+            {"strCarAirWind",       "空调", "空调风量", "fan"},
+            {"strCarAirInner",      "空调", "空调循环", "switch"},
+            {"strCarFrontDefrost",  "空调", "前除霜",   "switch"},
+            {"strCarRearDefrost",   "空调", "后除霜",   "switch"},
+            {"strCar1409",          "空调", "左区温度", "temp"},
+            {"strCar1410",          "空调", "右区温度", "temp"},
+            {"strCarVehicleLock",   "车门/车锁/车窗", "整车锁", "switch"},
+            {"strCarChildLock",     "车门/车锁/车窗", "儿童锁", "switch"},
+            {"strCarWindowForbit",  "车门/车锁/车窗", "车窗锁", "switch"},
+            {"strCarMirrorHeart",   "车门/车锁/车窗", "后视镜加热", "switch"},
+            {"strCarPm25",          "系统/能耗", "车内PM2.5", "pm"},
+            {"C11_MUSIC",           "系统/能耗", "媒体音量", "vol"},
+            {"C11_NAVI",            "系统/能耗", "导航音量", "vol"},
+            {"C11_SPEECH",          "系统/能耗", "语音音量", "vol"},
+            {"C11_CALL",            "系统/能耗", "通话音量", "vol"},
+        };
+        for (Object[] row : m)
+            SETTINGS_META.put((String) row[0],
+                    new String[]{(String) row[1], (String) row[2], (String) row[3]});
+    }
+
+    /** XML/节点字段 → 分组（未列出的默认归系统/能耗）。 */
+    private static String nodeGroup(String field) {
+        switch (field) {
+            case "speed": case "gear":
+                return "动力/底盘";
+            case "AirValue": case "AirState": case "Bottom_AC": case "SyncButton":
+            case "LeftTempValue": case "RightTempValue":
+            case "LeftSeatVentilation": case "RightSeatVentilation":
+            case "seatVentAuto": case "optionSeatVentilation": case "optionSeatVentilation02":
+                return "空调";
+            case "SunRoofProgress": case "carLock": case "carLock_double":
+            case "CMSlfDoor": case "CMSrfDoor":
+                return "车门/车锁/车窗";
+            case "CMSstopLight": case "CMSlTurnLight": case "CMSrTurnLight": case "Close":
+                return "灯光";
+            default:
+                return "系统/能耗";
+        }
+    }
+
+    /** 清单分组展示顺序（未识别固定在最后）。 */
+    private static final String[] GROUP_ORDER = {
+        "动力/底盘", "空调", "车门/车锁/车窗", "灯光",
+        "系统/能耗", "充电", "胎压", "行程", "定位", "未识别"
+    };
+
+    private static int groupIndex(String group) {
+        for (int i = 0; i < GROUP_ORDER.length; i++)
+            if (GROUP_ORDER[i].equals(group)) return i;
+        return GROUP_ORDER.length;
+    }
+
+    private static String formatSettings(String kind, String key, int iv) {
+        if ("temp".equals(kind))
+            return String.format(java.util.Locale.US, "%.1f°C", iv / 2.0);
+        if ("fan".equals(kind))  return iv + " 级";
+        if ("pm".equals(kind))   return iv + " µg/m³";
+        if ("vol".equals(kind))  return String.valueOf(iv);
+        return iv == 1 ? "开" : "关"; // switch
+    }
+
+    /**
+     * 把本轮全部渠道的信号汇总为清单行，按 {@link #GROUP_ORDER} 稳定排序。
+     * 同组内 settings → event → node → TPMS/GPS/行程，多渠道同名数据全部保留。
+     */
+    private void buildRows(DashboardSnapshot snap,
+                           java.util.ArrayList<SignalRow> settingsRows,
+                           LogcatVehicleSource.Result pr) {
+        java.util.ArrayList<SignalRow> all = new java.util.ArrayList<SignalRow>();
+        all.addAll(settingsRows);
+
+        if (pr != null) {
+            for (java.util.Map.Entry<Integer, LogcatVehicleSource.State> e
+                    : pr.eventStates.entrySet()) {
+                int id = e.getKey();
+                String g = LogcatVehicleSource.groupOfEvent(id);
+                if (g.isEmpty()) g = "未识别";
+                LogcatVehicleSource.State st = e.getValue();
+                String v = st.raw;
+                String unit = LogcatVehicleSource.unitOfEvent(id);
+                if (!unit.isEmpty()) v += " " + unit;
+                if (st.meaning != null) v += " (" + st.meaning + ")";
+                all.add(new SignalRow(g, st.name, v, "event/" + id));
+            }
+            for (java.util.Map.Entry<String, LogcatVehicleSource.State> e
+                    : pr.xmlStates.entrySet()) {
+                String field = e.getKey();
+                all.add(new SignalRow(nodeGroup(field), e.getValue().name,
+                        e.getValue().raw, "node/" + field));
+            }
+            for (java.util.Map.Entry<Integer, LogcatVehicleSource.State> e
+                    : pr.tireStates.entrySet()) {
+                all.add(new SignalRow("胎压", e.getValue().name,
+                        e.getValue().meaning, "TPMS/" + e.getKey()));
+            }
+            if (pr.gps.count > 0)
+                all.add(new SignalRow("定位", "GPS", pr.gps.meaning, "LocationDataC23"));
+            if (!pr.tripMile.isEmpty()) {
+                all.add(new SignalRow("行程", "自启动里程", pr.tripMile + " km",
+                        "EnergyDataBinder/EV_MILE"));
+                all.add(new SignalRow("行程", "自启动时间", pr.tripTime + " min",
+                        "EnergyDataBinder/EV_TIME"));
+                all.add(new SignalRow("行程", "平均能耗", pr.tripConsume + " kWh/100km",
+                        "EnergyDataBinder/CONSUME"));
+            }
+        }
+
+        java.util.Collections.sort(all, new java.util.Comparator<SignalRow>() {
+            @Override public int compare(SignalRow a, SignalRow b) {
+                int ga = groupIndex(a.group), gb = groupIndex(b.group);
+                return ga < gb ? -1 : (ga > gb ? 1 : 0);
+            }
+        });
+        snap.rows.addAll(all);
+        Logger.info(TAG, "信号清单组装 " + all.size() + " 行");
     }
 
     /** 把 LogcatVehicleSource 解析结果映射进快照 */

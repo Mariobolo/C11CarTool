@@ -10,10 +10,10 @@ public final class AppInfo {
     private AppInfo() {}
 
     /** 版本号（与 build.gradle versionName 保持一致） */
-    public static final String VERSION = "0.3.5.1";
+    public static final String VERSION = "0.3.6";
 
     /** 内部版本号（与 build.gradle versionCode 保持一致） */
-    public static final int VERSION_CODE = 11;
+    public static final int VERSION_CODE = 12;
 
     /** 应用显示名 */
     public static final String APP_NAME = "C11 车控";
@@ -26,7 +26,11 @@ public final class AppInfo {
      * 每行一条，格式：- 功能说明
      */
     public static final String FEATURE_LIST =
-            "- v0.3.5.1 修复版：状态条显示版本号、Web 弹窗带扫码二维码、诊断报告含 ADB 公钥指纹、车控实验清单按真机标定更新\n"
+            "- v0.3.6 数据全量对齐：状态条「📊 信号」进入全车信号清单，解析器拿到的信号全部可见\n"
+            + "- 多渠道并列：同一数据 settings/eventId/XML节点 各占一行并标注渠道，互不覆盖\n"
+            + "- 新增：行程里程/时间/平均能耗、驾驶模式、制动踏板、天窗遮阳帘、车窗开度、灯光状态、亮度、充电状态、GPS、座椅通风等\n"
+            + "- 抓取 TAG 由 5 个补齐到 12 个（含 EnergyDataBinder/C11AirConditioner 等）\n"
+            + "- v0.3.5.1 修复版：状态条显示版本号、Web 弹窗带扫码二维码、诊断报告含 ADB 公钥指纹、车控实验清单按真机标定更新\n"
             + "- v0.3.5 公开版：打开即仪表盘（按钮+数据方块+图标，固定网格 12 列）\n"
             + "- 数据方块：电量/续航/电压/车外温度/胎压胎温/车门/PM2.5/四路音量，5s 自动刷新\n"
             + "- 空调大卡：主副驾温度/风量步进 + AC/最大制冷/内外循环/前后除霜（settings 真机键+回读）\n"
