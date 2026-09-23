@@ -1,6 +1,5 @@
 package com.c11.cartool;
 
-import android.content.Intent;
 
 /**
  * 车辆控制命令封装

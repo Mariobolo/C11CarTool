@@ -1,7 +1,6 @@
 package com.c11.cartool.dashboard;
 
 import android.content.Context;
-import android.graphics.Typeface;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.LinearLayout;

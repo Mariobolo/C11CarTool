@@ -1,7 +1,6 @@
 package com.c11.cartool;
 
 import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -12,7 +11,6 @@ import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.net.URLDecoder;
 import java.util.Enumeration;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
@@ -199,6 +197,7 @@ public class WebServer {
         java.util.List<String> ips = getAllIps();
         for (String s : ips) { String[] p = s.split(" ");
             if (p.length >= 2 && p[0].startsWith("wlan")) return p[1]; }
+        // NPE safe: p[1] accessed after length check
         for (String s : ips) { String[] p = s.split(" ");
             if (p.length >= 2 && !p[0].startsWith("eth") && !p[1].startsWith("127.")) return p[1]; }
         for (String s : ips) { String[] p = s.split(" ");
@@ -256,7 +255,7 @@ public class WebServer {
                     String value = line.substring(colon + 1).trim();
                     headers.put(key, value);
                     if (key.equals("content-length")) {
-                        contentLength = Integer.parseInt(value);
+                        try { contentLength = Integer.parseInt(value); } catch (NumberFormatException ignored) {}
                     }
                 }
             }
