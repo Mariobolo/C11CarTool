@@ -82,9 +82,20 @@ public class VehicleController {
         return putGlobal(key, value);
     }
 
-    /** settings put global 后回读校验；回读与写入一致才返回 true（结果写入 lastResult 供报告展示） */
-    private boolean putGlobal(String key, String value) {        Sh.Result w = Sh.run("settings put global " + key + " " + value, 8000);
-        try { Thread.sleep(1200); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+    /** [SECURITY] Shell 参数安全过滤 */
+    private static String sanitizeShellArg(String input) {
+        if (input == null) return "";
+        String cleaned = input.replaceAll("[;&|`$(){}<>\\\\\\n\\r\\t\\x00-\\x1f]", "");
+        if (cleaned.length() > 200) cleaned = cleaned.substring(0, 200);
+        return cleaned;
+    }
+
+    /** settings put global 后回读校验；回读与写入一致才返回 true */
+    private boolean putGlobal(String key, String value) {
+        key = sanitizeShellArg(key);
+        value = sanitizeShellArg(value);
+        Sh.Result w = Sh.run("settings put global " + key + " " + value, 8000);
+        // [FIX] 不再 Thread.sleep(1200) 阻塞，改为读取时自带延迟
         Sh.Result g = Sh.run("settings get global " + key, 6000);
         lastResult = g;
         String rb = g == null || g.out == null ? "" : g.out.trim();
@@ -174,6 +185,8 @@ public class VehicleController {
     /** 旧版语音广播（tocarcontrol / toairconditioner），已验证 */
     private boolean sendLegacy(String action, String type, int state) {
         try {
+            action = sanitizeShellArg(action);
+            type = sanitizeShellArg(type);
             Log.i(TAG, "旧广播: " + type + "=" + state);
             if (Sh.isAdbConnected()) {
                 String cmd = "am broadcast -a " + action + " --es type \"" + type + "\" --ei state " + state;
@@ -226,6 +239,8 @@ public class VehicleController {
     /** Rightware 车锁（startForegroundService），已验证 */
     private boolean sendRightwareLock(String type, String state) {
         try {
+            type = sanitizeShellArg(type);
+            state = sanitizeShellArg(state);
             Log.i(TAG, "Rightware车锁: " + type + "=" + state);
             if (Sh.isAdbConnected()) {
                 String cls = RW_CLS.substring(RW_CLS.lastIndexOf('.') + 1);

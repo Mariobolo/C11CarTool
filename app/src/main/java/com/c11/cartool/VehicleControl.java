@@ -11,7 +11,17 @@ import android.content.Intent;
  *   2. Broadcast - 发送广播控制车辆
  *   3. Logcat - 被动监控车辆状态
  */
+ * v0.3.7 安全加固：Shell 参数 sanitize + 批量读取 API
+ */
 public final class VehicleControl {
+
+    // [SECURITY] Shell 参数安全过滤
+    private static String sanitizeShellArg(String input) {
+        if (input == null) return "";
+        String cleaned = input.replaceAll("[;&|`$(){}<>\\\\\\n\\r\\t\\x00-\\x1f]", "");
+        if (cleaned.length() > 200) cleaned = cleaned.substring(0, 200);
+        return cleaned;
+    }
 
     // ═══ 广播 Action 常量 ═══
     public static final String ACTION_TO_CAR_CONTROL = "com.leapmotor.speech.tocarcontrol";
@@ -52,6 +62,8 @@ public final class VehicleControl {
     // ═══ 写入 Settings.Global ═══
 
     public static void setSetting(String key, String value, String ns) {
+        key = sanitizeShellArg(key);
+        value = sanitizeShellArg(value);
         String cmd;
         switch (ns) {
             case "global": cmd = "settings put global " + key + " " + value; break;
@@ -74,10 +86,53 @@ public final class VehicleControl {
     }
 
     /**
-     * 发送广播 (string extra)
+     * [PERF] 批量读取：一次性获取全部 global settings
+     */
+    public static java.util.Map<String, String> getAllSettingsMap() {
+        java.util.Map<String, String> map = new java.util.HashMap<>();
+        Sh.Result r = Sh.run("settings list global 2>&1");
+        if (r.out != null) {
+            for (String line : r.out.split("\n")) {
+                int eq = line.indexOf('=');
+                if (eq > 0) {
+                    map.put(line.substring(0, eq).trim(), line.substring(eq + 1).trim());
+                }
+            }
+        }
+        return map;
+    }
+
+    /**
+     * [PERF] 批量读取：一次性获取全部系统属性
+     */
+    public static java.util.Map<String, String> getAllPropsMap() {
+        java.util.Map<String, String> map = new java.util.HashMap<>();
+        Sh.Result r = Sh.run("getprop");
+        if (r.out != null) {
+            for (String line : r.out.split("\n")) {
+                int lb = line.indexOf('[');
+                int rb = line.indexOf("]:");
+                if (lb >= 0 && rb > lb) {
+                    String k = line.substring(lb + 1, rb);
+                    String v = "";
+                    int vb = line.indexOf("[", rb);
+                    int ve = line.lastIndexOf("]");
+                    if (vb >= 0 && ve > vb) v = line.substring(vb + 1, ve);
+                    map.put(k, v);
+                }
+            }
+        }
+        return map;
+    }
+
+    /**
+     * 发送广播 (string extra) —— [SECURITY] 参数经过 sanitize
      */
     public static void broadcastString(String action, String extraName, String value) {
-        String cmd = "am broadcast -a " + action + " --es " + extraName + " \"" + value + "\"";
+        action = sanitizeShellArg(action);
+        extraName = sanitizeShellArg(extraName);
+        String safeValue = sanitizeShellArg(value);
+        String cmd = "am broadcast -a " + action + " --es " + extraName + " \"" + safeValue + "\"";
         Sh.Result r = Sh.run(cmd);
         Logger.cmd(cmd, r);
     }
@@ -203,16 +258,18 @@ public final class VehicleControl {
 
     // ═══ TTS 语音 ═══
 
+    /** [SECURITY] TTS 文本经过 sanitize */
     public static void speak(String text) {
+        String safeText = sanitizeShellArg(text);
         String cmd = "am startservice"
                 + " -n com.iflytek.cutefly.speechclient.hmi/com.iflytek.autofly.voicecoreservice.tts.TtsService"
                 + " --es operation PLAY"
-                + " --es text \"" + text + "\""
+                + " --es text \"" + safeText + "\""
                 + " --es package leap"
                 + " --es priority high"
                 + " --ei streamType 3";
         Sh.Result r = Sh.run(cmd);
-        Logger.cmd("TTS: " + text, r);
+        Logger.cmd("TTS: " + safeText, r);
     }
 
     // ═══ 导航/媒体/电话 ═══
@@ -244,6 +301,7 @@ public final class VehicleControl {
     }
 
     public static String getLogcat(int lines) {
+        lines = Math.max(1, Math.min(lines, 10000));
         return Sh.out("logcat -d -t " + lines);
     }
 

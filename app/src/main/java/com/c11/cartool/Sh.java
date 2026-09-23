@@ -26,11 +26,34 @@ import java.util.List;
  *     - settings put：需要 WRITE_SECURE_SETTINGS，普通应用无此权限
  *     - am broadcast：可执行，但接收方可能有签名权限保护而拒绝
  *     - logcat：Android 4.1+ 限制普通应用只能读取自己进程的日志
+ * v0.3.7 优化：统一 IO 线程池（替代散落的 new Thread().start()）
  */
 public final class Sh {
 
     private static final String TAG = "Shell";
     private static android.content.Context appContext;
+
+    // [PERF] 统一 IO 线程池（3 线程 daemon）
+    private static final java.util.concurrent.ExecutorService IO_EXECUTOR =
+        java.util.concurrent.Executors.newFixedThreadPool(3, new java.util.concurrent.ThreadFactory() {
+            private int count = 0;
+            @Override public Thread newThread(Runnable r) {
+                Thread t = new Thread(r, "c11-io-" + (++count));
+                t.setDaemon(true);
+                return t;
+            }
+        });
+
+    /** 异步执行任务（使用统一线程池） */
+    public static java.util.concurrent.Future<?> submitAsync(Runnable task) {
+        return IO_EXECUTOR.submit(task);
+    }
+
+    /** 关闭线程池 */
+    public static void shutdownExecutor() {
+        IO_EXECUTOR.shutdown();
+        try { IO_EXECUTOR.awaitTermination(2, java.util.concurrent.TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
+    }
 
     /** 设置应用上下文（用于 ADB 密钥存储） */
     public static void setContext(android.content.Context ctx) {
@@ -234,14 +257,15 @@ public final class Sh {
                 lastConnectTime = System.currentTimeMillis();
                 Logger.ok(TAG, "ADB 连接成功，预热中...");
                 // 在后台检测 uid（不阻塞连接返回）
-                new Thread(() -> {
+                // [PERF] 使用统一线程池
+                submitAsync(() -> {
                     synchronized (adbLock) {
                         if (adbClient != null && adbClient.isConnected()) {
                             detectUidAfterConnect();
                             notifyStateChanged();
                         }
                     }
-                }, "AdbUidDetect").start();
+                }, "AdbUidDetect");
             } else {
                 adbClient = null;
                 adbUid = -1;

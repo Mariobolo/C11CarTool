@@ -9,12 +9,16 @@ package com.c11.cartool;
  * - 实时连接状态 + Toast 反馈
  * - 日志查看 / 一键诊断
  */
+ * v0.3.7 安全加固：所有 API fetch 携带 X-Auth-Token
+ */
 public final class WebPages {
 
     private WebPages() {}
 
-    public static String getIndexPage() {
-        return HTML;
+    public static String getIndexPage(String authToken) {
+        String token = (authToken == null) ? "" : authToken;
+        // 在 JS 中注入 token，并从 URL ?t=xxx 兼容读取
+        return HTML.replace("__AUTH_TOKEN__", token);
     }
 
     private static final String HTML = "<!DOCTYPE html>"
@@ -175,11 +179,13 @@ public final class WebPages {
 + "t.className='toast '+(type||'info');t.textContent=msg;w.appendChild(t);"
 + "setTimeout(function(){t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(function(){t.remove()},300)},2500);"
 + "}"
++ "var AUTH_TOKEN='__AUTH_TOKEN__';"
++ "function authHeaders(){return {'Content-Type':'application/json','X-Auth-Token':AUTH_TOKEN};}"
 + "function cmd(action,btn){"
 + "if(busy){toast('请稍候...','info');return;}"
 + "busy=true;"
 + "if(btn){btn.classList.add('loading');var orig=btn.innerHTML;btn.innerHTML='<span class=spinner></span>';}"
-+ "fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:action})})"
++ "fetch('/api/control',{method:'POST',headers:authHeaders(),body:JSON.stringify({action:action})})"
 + ".then(function(r){return r.json()})"
 + ".then(function(d){"
 + "busy=false;"
@@ -231,6 +237,7 @@ public final class WebPages {
 + "}).catch(function(e){toast('诊断错误: '+e.message,'err');});"
 + "}"
 + "function escapeHtml(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}"
++ "if(!AUTH_TOKEN){var m=location.search.match(/[?&]t=([^&]+)/);if(m)AUTH_TOKEN=decodeURIComponent(m[1]);}"
 + "refreshStatus();"
 + "setInterval(refreshStatus,5000);"
 + "</script></body></html>";

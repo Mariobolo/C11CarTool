@@ -18,11 +18,15 @@ import java.util.Locale;
  *   - 性能监控
  *   - 日志上限（防止内存溢出，默认 1000 条）
  *   - 导出全部日志
+ *
+ * v0.3.7 修复：SimpleDateFormat 线程安全（ThreadLocal 隔离）
  */
 public final class Logger {
     private static final String TAG = "C11CarTool";
-    private static final SimpleDateFormat TS =
-            new SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault());
+
+    // [FIX] SimpleDateFormat 非线程安全，多线程并发会输出乱码甚至崩溃
+    private static final ThreadLocal<SimpleDateFormat> TS = ThreadLocal.withInitial(
+            () -> new SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()));
 
     /** 日志上限（超过自动清空旧的） */
     private static final int MAX_LOG_ENTRIES = 1000;
@@ -32,8 +36,8 @@ public final class Logger {
     public interface Callback { void onLog(String line, Level level); }
     public interface PerfCallback { void onPerf(String cmd, long durationMs); }
 
-    private static Callback cb;
-    private static PerfCallback perfCb;
+    private static volatile Callback cb;
+    private static volatile PerfCallback perfCb;
     private static final List<String> cmdLog = new ArrayList<>();
 
     public static void setCallback(Callback c) { cb = c; }
@@ -63,7 +67,7 @@ public final class Logger {
     // ═══ 命令执行日志 ═══
 
     public static void cmd(String command, Sh.Result result) {
-        String entry = TS.format(new Date()) + " $ " + command
+        String entry = TS.get().format(new Date()) + " $ " + command
                 + "\n  exit=" + result.exit
                 + " duration=" + result.durationMs + "ms"
                 + (result.timeout ? " [TIMEOUT]" : "")
@@ -74,13 +78,14 @@ public final class Logger {
     }
 
     public static void cmd(String command, String output) {
-        String entry = TS.format(new Date()) + " $ " + command + "\n  → " + trunc(output, 500);
+        String entry = TS.get().format(new Date()) + " $ " + command + "\n  → " + trunc(output, 500);
         addCmdLog(entry);
         log(Level.CMD, null, command + " → " + trunc(output, 100));
     }
 
     public static void onPerf(String cmd, long durationMs) {
-        if (perfCb != null) perfCb.onPerf(cmd, durationMs);
+        PerfCallback p = perfCb;
+        if (p != null) p.onPerf(cmd, durationMs);
     }
 
     // ═══ 日志管理 ═══
@@ -147,11 +152,11 @@ public final class Logger {
     // ═══ 核心日志方法 ═══
 
     private static void log(Level lv, String tag, String msg) {
-        String ts = TS.format(new Date());
+        String ts = TS.get().format(new Date());
         String tagStr = (tag != null && !tag.isEmpty()) ? " [" + tag + "]" : "";
         String line = "[" + ts + "]" + tagStr + " " + msg;
 
-        // 输出到 logcat（普通应用只能看到自己的日志，但这是标准做法）
+        // 输出到 logcat
         switch (lv) {
             case TITLE: Log.i(TAG, "═══ " + msg); break;
             case STEP:  Log.i(TAG, "  → " + msg); break;
@@ -164,9 +169,10 @@ public final class Logger {
         }
 
         // UI 回调
-        if (cb != null) {
+        Callback c = cb;
+        if (c != null) {
             try {
-                cb.onLog(line, lv);
+                c.onLog(line, lv);
             } catch (Exception e) {
                 Log.e(TAG, "Logger callback error: " + e.getMessage());
             }

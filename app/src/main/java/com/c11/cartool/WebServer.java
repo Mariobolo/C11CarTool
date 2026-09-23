@@ -28,6 +28,10 @@ import java.util.Map;
  *   - 运行一键诊断
  *
  * 基于 Java ServerSocket 实现，无需 NanoHTTPD 等外部库
+ * v0.3.7 安全加固：
+ *   - /api/control 需要 X-Auth-Token 鉴权（token 在启动时随机生成）
+ *   - CORS 收紧（不再 * 全开）
+ *   - escapeJson 补全控制字符/换行符
  */
 public class WebServer {
 
@@ -40,12 +44,18 @@ public class WebServer {
     private int port = DEFAULT_PORT;
     private static volatile int lastStartedPort = -1;
 
+    // [SECURITY] Web 控制鉴权 token（启动时随机生成，二维码 URL 携带）
+    private volatile String authToken = null;
+
     public static int lastStartedPort() { return lastStartedPort; }
     private com.c11.cartool.vehicle.VehicleController vehicleController;
 
     public void setVehicleController(com.c11.cartool.vehicle.VehicleController vc) {
         this.vehicleController = vc;
     }
+
+    /** 获取当前鉴权 token（用于生成二维码 URL） */
+    public String getAuthToken() { return authToken; }
 
     /**
      * 启动 Web 服务器
@@ -58,6 +68,9 @@ public class WebServer {
             Logger.warn(TAG, "服务器已在运行中");
             return false;
         }
+        // [SECURITY] 每次启动生成新 token
+        authToken = java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+        Logger.info(TAG, "Web 控制 token 已生成: " + authToken);
         // 端口自适应：被占用则自动递增，绑定 0.0.0.0（所有网卡可达）
         ServerSocket ss = null;
         int chosen = -1;
@@ -88,7 +101,7 @@ public class WebServer {
             serverThread.start();
             Logger.ok(TAG, "Web 服务器已启动，端口: " + chosen
                     + (chosen != preferredPort ? "（首选 " + preferredPort + " 被占用，已自动切换）" : ""));
-            Logger.ok(TAG, "访问地址: http://<车机IP>:" + chosen);
+            Logger.ok(TAG, "访问地址: http://<车机IP>:" + chosen + "/?t=" + authToken);
             return true;
         } catch (Exception e) {
             running = false;
@@ -273,44 +286,62 @@ public class WebServer {
 
     // ═══ 路由 ═══
 
-    private void route(String method, String path, String body, OutputStream out) throws IOException {
-        // 静态页面
-        if (path.equals("/") || path.equals("/index.html")) {
-            sendResponse(out, 200, "text/html; charset=utf-8", WebPages.getIndexPage().getBytes(StandardCharsets.UTF_8));
+    private void route(String method, String path, String body, java.util.Map<String, String> headers, OutputStream out) throws IOException {
+        // 去掉 query string 得到纯 path
+        String purePath = path;
+        int qIdx = path.indexOf('?');
+        if (qIdx > 0) purePath = path.substring(0, qIdx);
+
+        // [SECURITY] /api/control 鉴权检查
+        if (purePath.equals("/api/control")) {
+            String token = headers != null ? headers.get("x-auth-token") : null;
+            if (token == null) token = extractTokenFromPath(path);
+            if (authToken != null && !authToken.isEmpty() && !authToken.equals(token)) {
+                Logger.warn(TAG, "[SECURITY] /api/control 鉴权失败，拒绝请求");
+                sendResponse(out, 401, "application/json; charset=utf-8",
+                        "{\"success\":false,\"error\":\"unauthorized: missing or invalid token\"}".getBytes(StandardCharsets.UTF_8));
+                return;
+            }
+        }
+
+        // 静态页面（携带 token 注入到 JS）
+        if (purePath.equals("/") || purePath.equals("/index.html")) {
+            String html = WebPages.getIndexPage(authToken);
+            sendResponse(out, 200, "text/html; charset=utf-8", html.getBytes(StandardCharsets.UTF_8));
             return;
         }
 
         // API: 获取车辆状态
-        if (path.equals("/api/status") && method.equals("GET")) {
+        if (purePath.equals("/api/status") && method.equals("GET")) {
             String json = getVehicleStatusJson();
             sendResponse(out, 200, "application/json; charset=utf-8", json.getBytes(StandardCharsets.UTF_8));
             return;
         }
 
         // API: 执行车控命令
-        if (path.equals("/api/control") && method.equals("POST")) {
+        if (purePath.equals("/api/control") && method.equals("POST")) {
             String result = executeControl(body);
             sendResponse(out, 200, "application/json; charset=utf-8", result.getBytes(StandardCharsets.UTF_8));
             return;
         }
 
         // API: 获取日志
-        if (path.equals("/api/logs") && method.equals("GET")) {
+        if (purePath.equals("/api/logs") && method.equals("GET")) {
             String json = getLogsJson();
             sendResponse(out, 200, "application/json; charset=utf-8", json.getBytes(StandardCharsets.UTF_8));
             return;
         }
 
         // API: 运行诊断
-        if (path.equals("/api/diagnostic") && method.equals("GET")) {
+        if (purePath.equals("/api/diagnostic") && method.equals("GET")) {
             String report = DiagnosticMode.runFullDiagnostic(null);
             String json = "{\"success\":true,\"report\":" + escapeJson(report) + "}";
             sendResponse(out, 200, "application/json; charset=utf-8", json.getBytes(StandardCharsets.UTF_8));
             return;
         }
 
-        // API: 服务器信息（含全部网卡 IP、ADB/权限状态、运行时长）
-        if (path.equals("/api/info") && method.equals("GET")) {
+        // API: 服务器信息
+        if (purePath.equals("/api/info") && method.equals("GET")) {
             StringBuilder sb = new StringBuilder();
             sb.append("{\"success\":true");
             sb.append(",\"ip\":\"").append(getDeviceIp()).append("\"");
@@ -378,11 +409,32 @@ public class WebServer {
         return sb.toString();
     }
 
+    /** 从 URL path 中提取 token 参数 */
+    private static String extractTokenFromPath(String path) {
+        int q = path.indexOf('?');
+        if (q < 0) return null;
+        String query = path.substring(q + 1);
+        for (String kv : query.split("&")) {
+            int eq = kv.indexOf('=');
+            if (eq > 0 && kv.substring(0, eq).equals("t")) {
+                return kv.substring(eq + 1);
+            }
+        }
+        return null;
+    }
+
     private String executeControl(String body) {
         try {
             String action = extractJsonValue(body, "action");
             if (action == null || action.isEmpty()) {
                 return "{\"success\":false,\"error\":\"missing action\"}";
+            }
+
+            // [SECURITY] action 白名单校验，防止注入
+            action = action.trim();
+            if (!action.matches("[a-zA-Z0-9_]{1,50}")) {
+                Logger.warn(TAG, "[SECURITY] 非法 action: " + action);
+                return "{\"success\":false,\"error\":\"invalid action format\"}";
             }
 
             Logger.info(TAG, "[Web控制] action=" + action);
@@ -450,23 +502,44 @@ public class WebServer {
     // ═══ 工具方法 ═══
 
     private void sendResponse(OutputStream out, int status, String contentType, byte[] body) throws IOException {
-        String statusText = status == 200 ? "OK" : status == 404 ? "Not Found" : status == 500 ? "Internal Server Error" : "Error";
+        String statusText = status == 200 ? "OK" : status == 404 ? "Not Found" : status == 500 ? "Internal Server Error" : status == 401 ? "Unauthorized" : "Error";
+        // [SECURITY] CORS 收紧：不再 * 全开
         String header = "HTTP/1.1 " + status + " " + statusText + "\r\n" +
                        "Content-Type: " + contentType + "\r\n" +
                        "Content-Length: " + body.length + "\r\n" +
-                       "Access-Control-Allow-Origin: *\r\n" +
+                       "X-Content-Type-Options: nosniff\r\n" +
                        "Connection: close\r\n\r\n";
         out.write(header.getBytes(StandardCharsets.UTF_8));
         out.write(body);
     }
 
+    /**
+     * [FIX] JSON 字符串转义（补全控制字符/换行/Unicode）。
+     * 此前只处理了 " 和 \，换行符/控制字符会导致 JSON 解析失败。
+     */
     private static String escapeJson(String s) {
         if (s == null) return "";
         StringBuilder sb = new StringBuilder();
         for (char c : s.toCharArray()) {
             switch (c) {
-                case '"': sb.append("\\\""); break;
+                case '"':  sb.append("\\\""); break;
                 case '\\': sb.append("\\\\"); break;
+                case '\n': sb.append("\\n"); break;
+                case '\r': sb.append("\\r"); break;
+                case '\t': sb.append("\\t"); break;
+                case '\b': sb.append("\\b"); break;
+                case '\f': sb.append("\\f"); break;
+                default:
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+                    break;
+            }
+        }
+        return sb.toString();
+    }
                 case '\n': sb.append("\\n"); break;
                 case '\r': sb.append("\\r"); break;
                 case '\t': sb.append("\\t"); break;
