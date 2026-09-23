@@ -8,7 +8,6 @@ package com.c11.cartool;
  * - 卡片式分组控制
  * - 实时连接状态 + Toast 反馈
  * - 日志查看 / 一键诊断
- */
  * v0.3.7 安全加固：所有 API fetch 携带 X-Auth-Token
  */
 public final class WebPages {

@@ -9,7 +9,6 @@ package com.c11.cartool;
  *   1. Settings.Global - 直接读写系统属性
  *   2. Broadcast - 发送广播控制车辆
  *   3. Logcat - 被动监控车辆状态
- */
  * v0.3.7 安全加固：Shell 参数 sanitize + 批量读取 API
  */
 public final class VehicleControl {

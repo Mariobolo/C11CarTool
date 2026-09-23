@@ -265,7 +265,7 @@ public final class Sh {
                             notifyStateChanged();
                         }
                     }
-                }, "AdbUidDetect");
+                });
             } else {
                 adbClient = null;
                 adbUid = -1;
@@ -278,6 +278,39 @@ public final class Sh {
     /** 便捷方法：连接本地 adbd */
     public static boolean connectLocalAdb() {
         return connectAdb("127.0.0.1", 5555, 15000);
+    }
+
+    // ═══ 启动自动连接（打开 App 即后台重试）═══
+    private static final int AUTO_CONNECT_MAX_ATTEMPTS = 6;
+    private static final long AUTO_CONNECT_INTERVAL_MS = 5000;
+
+    /**
+     * 启动时自动连接 ADB：后台最多尝试 {@value #AUTO_CONNECT_MAX_ATTEMPTS} 次，
+     * 每次间隔 {@value #AUTO_CONNECT_INTERVAL_MS}ms；成功即停，全部失败后放弃
+     * （用户仍可点状态条手动连接）。
+     * 与心跳分工：自动连接负责"从无到有"，心跳负责"连接建立后的断线重连与 uid 刷新"。
+     */
+    public static void autoConnect(String host, int port, int timeoutMs) {
+        submitAsync(() -> {
+            for (int attempt = 1; attempt <= AUTO_CONNECT_MAX_ATTEMPTS; attempt++) {
+                Logger.info(TAG, "自动连接 ADB（第" + attempt + "/" + AUTO_CONNECT_MAX_ATTEMPTS + "次）...");
+                if (connectAdb(host, port, timeoutMs) && isAdbConnected()) {
+                    Logger.ok(TAG, "自动连接成功（第" + attempt + "次尝试）");
+                    return;
+                }
+                if (attempt < AUTO_CONNECT_MAX_ATTEMPTS) {
+                    try { Thread.sleep(AUTO_CONNECT_INTERVAL_MS); }
+                    catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+                }
+            }
+            Logger.warn(TAG, "自动连接 " + AUTO_CONNECT_MAX_ATTEMPTS
+                    + " 次均失败，停止自动连接（可点状态条手动连接）");
+        });
+    }
+
+    /** 便捷方法：自动连接本地 adbd */
+    public static void autoConnectLocal() {
+        autoConnect("127.0.0.1", 5555, 10000);
     }
 
     /** 断开 ADB 连接 */

@@ -139,35 +139,39 @@ public class DashboardRepository {
             String val = t.substring(i + 1).trim();
             if (val.isEmpty()) continue;
 
-            int iv;
+            // 数字值才驱动卡片；非数字值（字符串状态）不丢弃，仍在信号清单原样展示
+            int iv = Integer.MIN_VALUE;
             try { iv = (int) Math.floor(Double.parseDouble(val)); }
-            catch (Exception e) { continue; }
+            catch (Exception ignored) { }
 
-            switch (key) {
-                case "strCarAirSwitch":     snap.acSwitch = iv; break;
-                case "strCarAirWind":       snap.fanSpeed = iv; break;
-                case "strCarAirInner":      snap.innerCycle = iv; break;
-                case "strCarFrontDefrost":  snap.frontDefrost = iv; break;
-                case "strCarRearDefrost":   snap.rearDefrost = iv; break;
-                case "strCar1409":          snap.driverTempHalf = iv; break;
-                case "strCar1410":          snap.passengerTempHalf = iv; break;
-                case "strCarVehicleLock":   snap.vehicleLock = iv; break;
-                case "strCarChildLock":     snap.childLock = iv; break;
-                case "strCarWindowForbit":  snap.windowForbit = iv; break;
-                case "strCarMirrorHeart":   snap.mirrorHeat = iv; break;
-                case "strCarPm25":          snap.pm25 = iv; break;
-                case "C11_MUSIC":           snap.musicVol = iv; break;
-                case "C11_NAVI":            snap.naviVol = iv; break;
-                case "C11_SPEECH":          snap.speechVol = iv; break;
-                case "C11_CALL":            snap.callVol = iv; break;
-                default: break;
+            if (iv != Integer.MIN_VALUE) {
+                switch (key) {
+                    case "strCarAirSwitch":     snap.acSwitch = iv; break;
+                    case "strCarAirWind":       snap.fanSpeed = iv; break;
+                    case "strCarAirInner":      snap.innerCycle = iv; break;
+                    case "strCarFrontDefrost":  snap.frontDefrost = iv; break;
+                    case "strCarRearDefrost":   snap.rearDefrost = iv; break;
+                    case "strCar1409":          snap.driverTempHalf = iv; break;
+                    case "strCar1410":          snap.passengerTempHalf = iv; break;
+                    case "strCarVehicleLock":   snap.vehicleLock = iv; break;
+                    case "strCarChildLock":     snap.childLock = iv; break;
+                    case "strCarWindowForbit":  snap.windowForbit = iv; break;
+                    case "strCarMirrorHeart":   snap.mirrorHeat = iv; break;
+                    case "strCarPm25":          snap.pm25 = iv; break;
+                    case "C11_MUSIC":           snap.musicVol = iv; break;
+                    case "C11_NAVI":            snap.naviVol = iv; break;
+                    case "C11_SPEECH":          snap.speechVol = iv; break;
+                    case "C11_CALL":            snap.callVol = iv; break;
+                    default: break;
+                }
             }
 
             String[] meta = SETTINGS_META.get(key);
             if (meta != null) {
+                String shown = iv != Integer.MIN_VALUE
+                        ? formatSettings(meta[2], key, iv) : val;
                 settingsRows.add(new SignalRow(
-                        meta[0], meta[1], formatSettings(meta[2], key, iv),
-                        "settings/" + key));
+                        meta[0], meta[1], shown, "settings/" + key));
             }
         }
     }
@@ -195,6 +199,39 @@ public class DashboardRepository {
             {"C11_NAVI",            "系统/能耗", "导航音量", "vol"},
             {"C11_SPEECH",          "系统/能耗", "语音音量", "vol"},
             {"C11_CALL",            "系统/能耗", "通话音量", "vol"},
+            // ── v0.3.7 从 Rightware vdex 共享区补全的真机键（含义未标定者用 raw 原样展示，不臆测）──
+            {"strCar100006",            "空调", "空调界面", "switch"},
+            {"strCarAirStatus",         "空调", "空调状态", "raw"},
+            {"strCarAntiColdWindMode",  "空调", "防冷风模式", "switch"},
+            {"strCarPTCOutTemp",        "空调", "PTC输出温度", "raw"},
+            {"strCarTrunkState",        "车门/车锁/车窗", "后备箱状态", "raw"},
+            {"strCarSentinelMode",      "车门/车锁/车窗", "哨兵模式", "switch"},
+            {"str_unLock",              "车门/车锁/车窗", "解锁指令", "raw"},
+            {"str_unLocked",            "车门/车锁/车窗", "已解锁", "raw"},
+            {"strCarSlowChargeLockSts", "充电", "慢充锁状态", "switch"},
+            {"str_slowChargeUnLock",    "充电", "慢充解锁", "raw"},
+            {"strCarWirelessCharge",    "系统/能耗", "无线充电", "switch"},
+            {"strCarSeat",              "系统/能耗", "座椅状态", "raw"},
+            {"strCarSeat1216",          "系统/能耗", "座椅状态1216", "raw"},
+            {"strCarSeat1520",          "系统/能耗", "座椅状态1520", "raw"},
+            {"strCarSeat1521",          "系统/能耗", "座椅状态1521", "raw"},
+            {"strCarPageStatus",        "系统/能耗", "页面状态", "raw"},
+            {"strCarFace",              "系统/能耗", "Face状态", "raw"},
+            {"strCarCalibration",       "系统/能耗", "校准状态", "raw"},
+            {"strCar1217",              "系统/能耗", "状态1217", "raw"},
+            {"strCar1506",              "系统/能耗", "状态1506", "raw"},
+            {"strCar1518",              "系统/能耗", "状态1518", "raw"},
+            {"strCar9027",              "系统/能耗", "状态9027", "raw"},
+            {"strCarBleState",          "系统/能耗", "蓝牙状态", "raw"},
+            {"strCarBluetoothStatus",   "系统/能耗", "蓝牙连接", "raw"},
+            {"strCarCCConectSts",       "系统/能耗", "CarPlay连接", "raw"},
+            {"strCarWifiStatus",        "系统/能耗", "WiFi状态", "raw"},
+            {"strCar4gLevel",           "系统/能耗", "4G等级", "raw"},
+            {"strCarEntertainmentDisplay", "系统/能耗", "娱乐屏状态", "raw"},
+            {"strShowCarMode",          "系统/能耗", "显示模式", "raw"},
+            {"strCarVoiceCustom",       "系统/能耗", "语音自定义", "raw"},
+            {"strCarVoiceCustom2115",   "系统/能耗", "语音自定义2115", "raw"},
+            {"strCarBackMute",          "系统/能耗", "后排静音", "switch"},
         };
         for (Object[] row : m)
             SETTINGS_META.put((String) row[0],
@@ -238,7 +275,7 @@ public class DashboardRepository {
             return String.format(java.util.Locale.US, "%.1f°C", iv / 2.0);
         if ("fan".equals(kind))  return iv + " 级";
         if ("pm".equals(kind))   return iv + " µg/m³";
-        if ("vol".equals(kind))  return String.valueOf(iv);
+        if ("vol".equals(kind) || "raw".equals(kind))  return String.valueOf(iv);
         return iv == 1 ? "开" : "关"; // switch
     }
 
@@ -337,6 +374,12 @@ public class DashboardRepository {
         snap.doorStates[3] = intOf(event(r, 9126), -1); // 右后
         snap.doorStates[4] = intOf(event(r, 9127), -1); // 后备箱
         snap.doorStates[5] = intOf(event(r, 9128), -1); // 前机盖
+
+        // 四车窗开度%（顺序 左前 右前 左后 右后）
+        snap.windowPct[0] = intOf(event(r, 21181), -1);
+        snap.windowPct[1] = intOf(event(r, 21180), -1);
+        snap.windowPct[2] = intOf(event(r, 21183), -1);
+        snap.windowPct[3] = intOf(event(r, 21182), -1);
     }
 
     private static String xml(LogcatVehicleSource.Result r, String field) {

@@ -270,7 +270,7 @@ public class WebServer {
 
             // 路由
             try {
-                route(method, path, body, out);
+                route(method, path, body, headers, out);
             } catch (Exception e) {
                 Logger.error(TAG, "处理请求异常: " + path + " - " + e.getMessage());
                 sendResponse(out, 500, "text/plain", ("Internal Server Error: " + e.getMessage()).getBytes(StandardCharsets.UTF_8));
@@ -535,16 +535,6 @@ public class WebServer {
                         sb.append(c);
                     }
                     break;
-            }
-        }
-        return sb.toString();
-    }
-                case '\n': sb.append("\\n"); break;
-                case '\r': sb.append("\\r"); break;
-                case '\t': sb.append("\\t"); break;
-                default:
-                    if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
-                    else sb.append(c);
             }
         }
         return sb.toString();

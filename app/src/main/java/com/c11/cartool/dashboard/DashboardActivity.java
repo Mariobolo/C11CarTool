@@ -73,7 +73,7 @@ public class DashboardActivity extends Activity {
     private DoorsCardView doorsCard;
     private LockCardView lockCard;
     private MiniGridCardView lightsCard;
-    private MiniGridCardView windowsCard;
+    private WindowCardView windowsCard;
     private MiniGridCardView extraCard;
 
     private volatile boolean is720 = false;
@@ -94,6 +94,8 @@ public class DashboardActivity extends Activity {
         try { startWebAuto(); } catch (Exception e) { Logger.error("Web 自启异常: " + e.getMessage()); }
 
         Sh.startKeepAlive();
+        // 打开 App 即自动尝试连接 ADB（6 次重试、间隔 5s，全败才放弃），无需手动点
+        Sh.autoConnectLocal();
         Sh.addStateListener(adbListener);
 
         setContentView(buildUI());
@@ -233,21 +235,26 @@ public class DashboardActivity extends Activity {
         if (!is720) {
             // ── 中控 1920×1080：12×7 ──
             batteryCard = new DataCardView(this, "电量 / 续航 / 电压", c);
+            batteryCard.setChannel("event/node");
             grid.addCard(batteryCard, 0, 0, 3, 2);
 
             hvacCard = new HvacCardView(this, false, c);
             grid.addCard(hvacCard, 3, 0, 4, 4);
 
             outsideTempCard = new DataCardView(this, "车外温度", c);
+            outsideTempCard.setChannel("event");
             grid.addCard(outsideTempCard, 7, 0, 2, 1);
 
             musicVolCard = new DataCardView(this, "媒体音量", c);
+            musicVolCard.setChannel("settings");
             grid.addCard(musicVolCard, 9, 0, 2, 1);
 
             voltageCard = new DataCardView(this, "电池电压", c);
+            voltageCard.setChannel("event");
             grid.addCard(voltageCard, 7, 1, 2, 1);
 
             speechVolCard = new DataCardView(this, "语音音量", c);
+            speechVolCard.setChannel("settings");
             grid.addCard(speechVolCard, 9, 1, 2, 1);
 
             doorsCard = new DoorsCardView(this, c);
@@ -257,20 +264,16 @@ public class DashboardActivity extends Activity {
             grid.addCard(tiresCard, 7, 2, 2, 2);
 
             naviVolCard = new DataCardView(this, "导航音量", c);
+            naviVolCard.setChannel("settings");
             grid.addCard(naviVolCard, 9, 2, 2, 1);
 
             pm25Card = new DataCardView(this, "车内 PM2.5", c);
+            pm25Card.setChannel("settings");
             grid.addCard(pm25Card, 9, 3, 2, 1);
 
-            // 第 5 行：车窗 / 灯光 / 儿童锁 / 后备箱（一排迷你开关）
-            windowsCard = new MiniGridCardView(this, "车窗⚠",
-                    new ArrayList<MiniGridCardView.Item>() {{
-                        add(new MiniGridCardView.Item("win_fl", "左前", "🪟", true));
-                        add(new MiniGridCardView.Item("win_fr", "右前", "🪟", true));
-                        add(new MiniGridCardView.Item("win_rl", "左后", "🪟", true));
-                        add(new MiniGridCardView.Item("win_rr", "右后", "🪟", true));
-                    }}, c);
-            grid.addCard(windowsCard, 0, 4, 3, 1);
+            // 第 5 行：车窗档位卡 / 灯光 / 儿童锁 / 后备箱（一排）
+            windowsCard = new WindowCardView(this, false);
+            grid.addCard(windowsCard, 0, 4, 4, 1);
 
             lightsCard = new MiniGridCardView(this, "灯光",
                     new ArrayList<MiniGridCardView.Item>() {{
@@ -279,7 +282,7 @@ public class DashboardActivity extends Activity {
                         add(new MiniGridCardView.Item("fog", "后雾", "🌫", false));
                         add(new MiniGridCardView.Item("view360", "360", "📷", false));
                     }}, c);
-            grid.addCard(lightsCard, 3, 4, 4, 1);
+            grid.addCard(lightsCard, 4, 4, 4, 1);
 
             MiniGridCardView childCard = new MiniGridCardView(this, "儿童锁",
                     new ArrayList<MiniGridCardView.Item>() {{
@@ -287,7 +290,7 @@ public class DashboardActivity extends Activity {
                         add(new MiniGridCardView.Item("child_r", "右", "🔒", false));
                     }}, c);
             childCard.setListener(this::onMiniToggle);
-            grid.addCard(childCard, 7, 4, 2, 1);
+            grid.addCard(childCard, 8, 4, 2, 1);
 
             MiniGridCardView trunkCard = new MiniGridCardView(this, "后备箱⚠",
                     new ArrayList<MiniGridCardView.Item>() {{
@@ -295,7 +298,7 @@ public class DashboardActivity extends Activity {
                         add(new MiniGridCardView.Item("trunk_close", "关", "🚪", true));
                     }}, c);
             trunkCard.setListener(this::onMiniToggle);
-            grid.addCard(trunkCard, 9, 4, 2, 1);
+            grid.addCard(trunkCard, 10, 4, 2, 1);
 
             // 第 6 行：工具条
             grid.addCard(makeToolCard("🌐", "Web 遥控", () -> showWebInfoDialog(false)), 0, 5, 2, 1);
@@ -323,21 +326,26 @@ public class DashboardActivity extends Activity {
         } else {
             // ── 仪表/副驾 1920×720：12×4 精简 ──
             batteryCard = new DataCardView(this, "电量 / 续航 / 电压", c);
+            batteryCard.setChannel("event/node");
             grid.addCard(batteryCard, 0, 0, 3, 2);
 
             hvacCard = new HvacCardView(this, true, c);
             grid.addCard(hvacCard, 3, 0, 4, 2);
 
             outsideTempCard = new DataCardView(this, "车外温度", c);
+            outsideTempCard.setChannel("event");
             grid.addCard(outsideTempCard, 7, 0, 2, 1);
 
             musicVolCard = new DataCardView(this, "媒体音量", c);
+            musicVolCard.setChannel("settings");
             grid.addCard(musicVolCard, 9, 0, 2, 1);
 
             voltageCard = new DataCardView(this, "电池电压", c);
+            voltageCard.setChannel("event");
             grid.addCard(voltageCard, 7, 1, 2, 1);
 
             speechVolCard = new DataCardView(this, "语音音量", c);
+            speechVolCard.setChannel("settings");
             grid.addCard(speechVolCard, 9, 1, 2, 1);
 
             doorsCard = new DoorsCardView(this, c);
@@ -360,24 +368,20 @@ public class DashboardActivity extends Activity {
             grid.addCard(tiresCard, 7, 2, 2, 2);
 
             naviVolCard = new DataCardView(this, "导航音量", c);
+            naviVolCard.setChannel("settings");
             grid.addCard(naviVolCard, 9, 2, 2, 1);
 
             pm25Card = new DataCardView(this, "PM2.5", c);
+            pm25Card.setChannel("settings");
             grid.addCard(pm25Card, 9, 3, 2, 1);
 
-            windowsCard = new MiniGridCardView(this, "车窗⚠",
-                    new ArrayList<MiniGridCardView.Item>() {{
-                        add(new MiniGridCardView.Item("win_fl", "左前", "🪟", true));
-                        add(new MiniGridCardView.Item("win_fr", "右前", "🪟", true));
-                        add(new MiniGridCardView.Item("win_rl", "左后", "🪟", true));
-                        add(new MiniGridCardView.Item("win_rr", "右后", "🪟", true));
-                    }}, c);
-            grid.addCard(windowsCard, 0, 3, 3, 1);
+            windowsCard = new WindowCardView(this, true);
+            grid.addCard(windowsCard, 0, 3, 4, 1);
 
             lockCard = new LockCardView(this, c);
-            grid.addCard(lockCard, 3, 3, 4, 1);
+            grid.addCard(lockCard, 4, 3, 4, 1);
 
-            grid.addCard(makeToolCard("⚙", "工程", () -> startActivity(new Intent(this, MainActivity.class))), 7, 3, 2, 1);
+            grid.addCard(makeToolCard("⚙", "工程", () -> startActivity(new Intent(this, MainActivity.class))), 8, 3, 2, 1);
         }
     }
 
@@ -440,7 +444,7 @@ public class DashboardActivity extends Activity {
             });
         }
         if (lightsCard != null) lightsCard.setListener(this::onMiniToggle);
-        if (windowsCard != null) windowsCard.setListener(this::onMiniToggle);
+        if (windowsCard != null) windowsCard.setListener(this::onWindowSet);
         if (extraCard != null) extraCard.setListener(this::onMiniToggle);
         if (lockCard != null) lockCard.setListener((card, lock) ->
                 execAction(lock ? "锁车（实验性，观察是否落锁）" : "解锁（实验性）",
@@ -457,16 +461,18 @@ public class DashboardActivity extends Activity {
             case "child_r": execAction("右儿童锁（开）", () -> vc.rightChildLockOn()); break;
             case "trunk_open": execAction("后备箱开", () -> vc.openTrunk()); break;
             case "trunk_close": execAction("后备箱关", () -> vc.closeTrunk()); break;
-            case "win_fl": execToggle("左前窗 全开/全关⚠", checked, () -> vc.setWindow("front_left", 100), () -> vc.setWindow("front_left", 0)); break;
-            case "win_fr": execToggle("右前窗 全开/全关⚠", checked, () -> vc.setWindow("front_right", 100), () -> vc.setWindow("front_right", 0)); break;
-            case "win_rl": execToggle("左后窗 全开/全关⚠", checked, () -> vc.setWindow("rear_left", 100), () -> vc.setWindow("rear_left", 0)); break;
-            case "win_rr": execToggle("右后窗 全开/全关⚠", checked, () -> vc.setWindow("rear_right", 100), () -> vc.setWindow("rear_right", 0)); break;
             case "mirror_heat": execToggle("后视镜加热⚠", checked, () -> vc.setGlobalKey("strCarMirrorHeart", "1"), () -> vc.setGlobalKey("strCarMirrorHeart", "0")); break;
             case "window_forbit": execToggle("车窗锁⚠", checked, () -> vc.setGlobalKey("strCarWindowForbit", "1"), () -> vc.setGlobalKey("strCarWindowForbit", "0")); break;
             case "max_cool": execToggle("最大制冷", checked, () -> vc.acMaxOn(), () -> vc.acMaxOff()); break;
             case "ac_page": execAction("打开空调界面", () -> vc.setGlobalKey("strCar100006", "1")); break;
             default: break;
         }
+    }
+
+    /** 车窗档位卡：点击档位即下发目标开度（非 toggle，无方向问题） */
+    private void onWindowSet(String voiceName, int percent) {
+        execAction("车窗 " + voiceName + " → " + percent + "%",
+                () -> vc.setWindowByName(voiceName, percent));
     }
 
     private void tempStep(boolean driver, int delta) {
@@ -557,6 +563,12 @@ public class DashboardActivity extends Activity {
         webView.setText(webOn ? "Web " + webServer.getPort() : "Web 关");
         webView.setTextColor(webOn ? DashboardTheme.GREEN : DashboardTheme.DIM);
 
+        // 未连接：数据卡统一"加载中"（从未获取），车窗清除档位高亮，不进入 setData
+        if (!snap.adbConnected) {
+            setCardsLoading();
+            return;
+        }
+
         // 电量卡：电量% / 电压V / 续航km
         batteryCard.setData(snap.batterySoc >= 0 ? String.valueOf(snap.batterySoc) : null, "%",
                 subLine(snap.voltage > 0 ? "电压 " + one(snap.voltage) + "V" : null,
@@ -570,12 +582,26 @@ public class DashboardActivity extends Activity {
         pm25Card.setData(inRange(snap.pm25, 0, 1000) ? String.valueOf(snap.pm25) : null, "µg/m³", null);
 
         if (hvacCard != null) {
-            hvacCard.setTemps(tempOf(snap.driverTempHalf), tempOf(snap.passengerTempHalf));
+            hvacCard.setTemps(snap.driverTempHalf > 0 ? snap.driverTempHalf / 2 : -1,
+                              snap.passengerTempHalf > 0 ? snap.passengerTempHalf / 2 : -1);
             hvacCard.setFan(snap.fanSpeed);
             hvacCard.setToggles(snap.acSwitch, -1, snap.innerCycle, snap.frontDefrost, snap.rearDefrost);
         }
         if (tiresCard != null) tiresCard.setTires(snap.tirePressKpa, snap.tireTempC);
         if (doorsCard != null) doorsCard.setDoors(snap.doorStates);
+        if (windowsCard != null) windowsCard.setPositions(snap.windowPct);
+    }
+
+    /** 全部数据卡置"加载中"（ADB 未连接时） */
+    private void setCardsLoading() {
+        batteryCard.setLoading();
+        outsideTempCard.setLoading();
+        voltageCard.setLoading();
+        musicVolCard.setLoading();
+        speechVolCard.setLoading();
+        naviVolCard.setLoading();
+        pm25Card.setLoading();
+        if (windowsCard != null) windowsCard.setPositions(new int[]{-1, -1, -1, -1});
     }
 
     private String subLine(String a, String b) {

@@ -52,6 +52,9 @@ public class DashboardSnapshot {
     /** 六门状态（0关1开）：左前 右前 左后 右后 后备箱 前机盖 */
     public volatile int[] doorStates = {-1, -1, -1, -1, -1, -1};
 
+    /** 四车窗开度%（0=全关,100=全开）：左前 右前 左后 右后，-1 无值（eventId 21181/21180/21183/21182） */
+    public volatile int[] windowPct = {-1, -1, -1, -1};
+
     /** 上一轮 settings/logcat 是否成功（用于显示数据有效性） */
     public volatile boolean settingsOk = false;
     public volatile boolean logcatOk = false;

@@ -41,16 +41,14 @@ public class VehicleController {
         this.context = ctx != null ? ctx.getApplicationContext() : null;
     }
 
-    // ═══ 车锁（通道标定中）═══
-    // 背景：讯飞语音服务出于安全不发布整车锁 opcode(MMI_VEHLOCKCTRL=1200)，原车 Launcher 走独立 SOME/IP；
-    //      Rightware startservice 投递成功但实车不动作。故在「车控实验」对 settings / Rightware反向 两路上机逐项目视标定，
-    //      标定通过后再把 lockCar/unlockCar 主方法切到生效通道。
-    public boolean lockCar()   { return sendRightwareLock("vehicle_lock", "0"); } // 现通道(state 方向待标定)
-    public boolean unlockCar() { return sendRightwareLock("vehicle_lock", "1"); }
-    /** Rightware 反向（标定用：验证 state=1 是否才是锁车） */
-    public boolean lockCarRwAlt()   { return sendRightwareLock("vehicle_lock", "1"); }
-    public boolean unlockCarRwAlt() { return sendRightwareLock("vehicle_lock", "0"); }
-    /** settings 整车锁直控（标定用：strCarVehicleLock 写 1/0 并回读，0/1 语义待目视确认） */
+    // ═══ 整车锁 — Rightware Kanzi 服务（原车 BottomBar 同款通道）═══
+    // 逆向依据：SystemUI CarLockItemController.changeCarLockStatus() → RouterUtil.setCarLock(ctx, 0/1)
+    //   → startForegroundService 到 com.rightware.kanzi.c11carcontrol202008/.C11CarControl202008，
+    //   extras type="VehicleLock"，state 与原车一致（0=解锁、1=闭锁，埋点 dock_bar_car_lock 可证）。
+    // 早期失败原因：误用 type="vehicle_lock"，服务不识别，故只显示成功而实车不动。
+    public boolean lockCar()   { return sendRightware("VehicleLock", "1"); }
+    public boolean unlockCar() { return sendRightware("VehicleLock", "0"); }
+    /** settings 整车锁回写（备用/对照通道：shell 直写实车不动作，仅用于回读） */
     public boolean lockCarSettings(boolean lock) { return putGlobal("strCarVehicleLock", lock ? "1" : "0"); }
 
     // ═══ 灯光 — tocarcontrol 旧广播（已验证）═══
@@ -173,6 +171,19 @@ public class VehicleController {
                 .put("nameValue", percent + "%").put("targetScope", "vehicle"));
     }
 
+    /** 按讯飞车窗名直接设定开度（仪表盘车窗档位卡用，名字→区域映射归车辆层） */
+    public boolean setWindowByName(String voiceName, int percent) {
+        String area;
+        switch (voiceName) {
+            case "主驾车窗": area = "front_left";  break;
+            case "副驾车窗": area = "front_right"; break;
+            case "左后车窗": area = "rear_left";   break;
+            case "右后车窗": area = "rear_right";  break;
+            default: return false;
+        }
+        return setWindow(area, percent);
+    }
+
     // ═══ 360 全景 — handMessage ═══
     public boolean open360View() {
         return sendVoice("carControl", obj().put("operation", "OPEN").put("name", "360"));
@@ -236,12 +247,16 @@ public class VehicleController {
         }
     }
 
-    /** Rightware 车锁（startForegroundService），已验证 */
-    private boolean sendRightwareLock(String type, String state) {
+    /**
+     * Rightware Kanzi 车控服务（原车 SystemUI BottomBar 通道，startForegroundService）。
+     * @param type  原车驼峰协议，如 VehicleLock
+     * @param state 目标状态字符串（VehicleLock：0 解锁 / 1 闭锁）
+     */
+    private boolean sendRightware(String type, String state) {
         try {
             type = sanitizeShellArg(type);
             state = sanitizeShellArg(state);
-            Log.i(TAG, "Rightware车锁: " + type + "=" + state);
+            Log.i(TAG, "Rightware: " + type + "=" + state);
             if (Sh.isAdbConnected()) {
                 String cls = RW_CLS.substring(RW_CLS.lastIndexOf('.') + 1);
                 String cmd = "am startservice -n " + RW_PKG + "/." + cls

@@ -1862,7 +1862,7 @@ public class MainActivity extends Activity {
         // 一键全测
         contentArea.addView(makeSectionTitle("🧪 一键全测"));
         contentArea.addView(makeBtn("⚡ 快速全测（不确认，间隔1秒，仅供熟悉通道）", 0xFF6D4C41, v -> {
-            Sh.submitAsync(() -> runAllCarControls()).start();
+            Sh.submitAsync(() -> runAllCarControls());
         }));
     }
 

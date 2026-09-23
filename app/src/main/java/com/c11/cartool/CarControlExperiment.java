@@ -132,20 +132,14 @@ public final class CarControlExperiment {
                 "关闭后备箱，观察尾门动作。", true,
                 () -> vc.closeTrunk(), null));
 
-        // ══════════ D. ⚠ 实验性（通道未标定，逐项目视，车锁最终保持解锁） ══════════
-        // 车锁：人在车内、P 挡、带钥匙；目视哪一步真正落锁，反馈后定主通道
-        steps.add(new Step("lock_set_1", "⚠ 锁车① settings写1", "settings global（实验性）",
-                "【实验性】向 strCarVehicleLock 写 1，观察四门是否落锁（回读值见日志）。", true,
-                () -> vc.lockCarSettings(true), null));
-        steps.add(new Step("unlock_set_0", "⚠ 解锁① settings写0", "settings global（实验性）",
-                "【实验性】向 strCarVehicleLock 写 0，观察四门是否解锁。", true,
-                () -> vc.lockCarSettings(false), null));
-        steps.add(new Step("lock_rw_1", "⚠ 锁车② Rightware state1", "Rightware startservice（实验性）",
-                "【实验性】vehicle_lock 传 state=1，观察是否落锁。", true,
-                vc::lockCarRwAlt, null));
-        steps.add(new Step("unlock_rw_0", "⚠ 解锁收尾② state0", "Rightware startservice（实验性）",
-                "【实验性】vehicle_lock 传 state=0 收尾，确认车门最终处于解锁状态。", true,
-                vc::unlockCarRwAlt, null));
+        // ══════════ D. 整车锁（Rightware 原车通道，首次上机验证；最终保持解锁） ══════════
+        // 人在车内、P 挡、带钥匙；目视两步是否真正落/解锁（type 已由 SystemUI 逆向校正为 VehicleLock）
+        steps.add(new Step("lock_rw", "⚠ 整车锁 落锁", "Rightware VehicleLock state=1",
+                "【实验性】Rightware 服务 type=VehicleLock、state=1，观察四门是否落锁。", true,
+                vc::lockCar, null));
+        steps.add(new Step("unlock_rw", "⚠ 整车锁 解锁收尾", "Rightware VehicleLock state=0",
+                "【实验性】state=0 收尾，确认车门最终处于解锁状态。", true,
+                vc::unlockCar, null));
         // 车窗：handMessage 格式已验证，实车动作尚未标定
         steps.add(new Step("win_fl_up", "⚠ 主驾车窗升", "讯飞 handMessage（实验性）",
                 "【实验性】确认车窗无障碍，主驾车窗升到 100%，观察动作。", true,

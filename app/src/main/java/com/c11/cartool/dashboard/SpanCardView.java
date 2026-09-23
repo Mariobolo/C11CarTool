@@ -19,6 +19,9 @@ public abstract class SpanCardView extends FrameLayout {
     private TextView titleView;
     private TextView badgeView;
 
+    private String rawTitle;
+    private String channel;
+
     private GradientDrawable bg;
 
     public SpanCardView(Context context, String title, int cornerDp) {
@@ -35,6 +38,7 @@ public abstract class SpanCardView extends FrameLayout {
 
         // 标题行
         if (title != null && !title.isEmpty()) {
+            this.rawTitle = title;
             titleView = new TextView(context);
             titleView.setText(title);
             titleView.setTextColor(DashboardTheme.DIM);
@@ -93,11 +97,24 @@ public abstract class SpanCardView extends FrameLayout {
         badgeView.setText(text == null ? "" : text);
     }
 
+    /** 设置标题（渠道标注由 {@link #setChannel} 单独管理） */
     public void setTitle(String t) {
-        if (titleView != null) titleView.setText(t);
+        this.rawTitle = t;
+        applyTitle();
     }
 
-    public enum State { NORMAL, ACTIVE, ERROR }
+    /** 标注数据渠道，标题后以括号显示（null/空清除） */
+    public void setChannel(String c) {
+        this.channel = (c == null || c.isEmpty()) ? null : c;
+        applyTitle();
+    }
+
+    private void applyTitle() {
+        if (titleView == null) return;
+        titleView.setText(rawTitle + (channel == null ? "" : "（" + channel + "）"));
+    }
+
+    public enum State { NORMAL, ACTIVE, ERROR, LOADING }
 
     // ── 工具 ──
 
