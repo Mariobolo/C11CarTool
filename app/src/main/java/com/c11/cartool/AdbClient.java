@@ -131,6 +131,14 @@ public final class AdbClient {
         }
     }
 
+    /** 返回 ADB 公钥行文本（base64 + comment，去尾 \0），用于写入车机 adb_keys 固化授权 */
+    public String getPublicKeyLine() {
+        if (adbPublicKeyBytes == null) return "";
+        int n = adbPublicKeyBytes.length;
+        if (n > 0 && adbPublicKeyBytes[n - 1] == 0) n--;
+        return new String(adbPublicKeyBytes, 0, n);
+    }
+
     /**
      * 构造 ADB 格式的公钥（base64(二进制) + " user@host\0"）
      */

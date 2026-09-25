@@ -27,12 +27,18 @@ public class MiniGridCardView extends SpanCardView {
         public final String label;
         public final String emoji;
         public final boolean experimental; // 标注 ⚠（通道未最终标定）
+        public final boolean toggleable;   // true=有开/关状态（点击翻转，需外部回读校准）；false=一次性动作按钮
 
         public Item(String id, String label, String emoji, boolean experimental) {
+            this(id, label, emoji, experimental, false);
+        }
+
+        public Item(String id, String label, String emoji, boolean experimental, boolean toggleable) {
             this.id = id;
             this.label = label;
             this.emoji = emoji;
             this.experimental = experimental;
+            this.toggleable = toggleable;
         }
     }
 
@@ -87,8 +93,16 @@ public class MiniGridCardView extends SpanCardView {
 
         cell.setOnClickListener(v -> {
             if (listener == null) return;
-            boolean next = !Boolean.TRUE.equals(states.get(it.id));
-            listener.onToggle(MiniGridCardView.this, it.id, next);
+            if (it.toggleable) {
+                // 状态型：乐观翻转并高亮，外部回读会再次校准
+                boolean next = !Boolean.TRUE.equals(states.get(it.id));
+                states.put(it.id, next);
+                tint(cell, next);
+                listener.onToggle(MiniGridCardView.this, it.id, next);
+            } else {
+                // 动作型：不翻转、不保持高亮；具体动作由 Activity 按 id 决定（不依赖 checked）
+                listener.onToggle(MiniGridCardView.this, it.id, true);
+            }
         });
 
         views.put(it.id, cell);

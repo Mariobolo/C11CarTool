@@ -232,6 +232,46 @@ public final class Sh {
     }
 
     /**
+     * 连接成功后把本端公钥写入车机 {@code /data/misc/adb/adb_keys}，固化授权（免每次重弹）。
+     * 仅当 shell 对该文件可写时有效；失败返回真实原因（权限/路径），不影响主连接。
+     * 公钥为 base64 + 空格 + comment，不含 shell 元字符，用单引号包裹追加。
+     */
+    public static String persistKeyToDevice() {
+        synchronized (adbLock) {
+            if (adbClient == null || !adbClient.isConnected()) return "未连接，无法固化";
+            String pub = adbClient.getPublicKeyLine();
+            if (pub == null || pub.isEmpty()) return "公钥为空";
+
+            StringBuilder sb = new StringBuilder();
+            Result ls = adbClient.shell("ls -ld /data/misc/adb; ls -l /data/misc/adb/adb_keys", 6000);
+            sb.append("现状: ").append(ls.out != null ? ls.out.trim() : "(无)");
+            if (ls.err != null && !ls.err.isEmpty()) sb.append(" / ").append(ls.err.trim());
+
+            adbClient.shell("mkdir -p /data/misc/adb", 5000);
+            adbClient.shell("touch /data/misc/adb/adb_keys", 5000);
+
+            Result cat = adbClient.shell("cat /data/misc/adb/adb_keys", 6000);
+            String existing = cat.out != null ? cat.out : "";
+            if (existing.contains(pub)) {
+                sb.append("\n公钥已在 adb_keys，无需重复写入");
+                return sb.toString();
+            }
+
+            Result w = adbClient.shell("echo '" + pub + "' >> /data/misc/adb/adb_keys", 6000);
+            sb.append("\n写入 exit=").append(w.exit);
+            if (w.err != null && !w.err.isEmpty()) sb.append(" err=").append(w.err.trim());
+            adbClient.shell("chmod 640 /data/misc/adb/adb_keys", 5000);
+
+            Result verify = adbClient.shell("cat /data/misc/adb/adb_keys", 6000);
+            boolean ok = verify.out != null && verify.out.contains(pub);
+            sb.append("\n固化").append(ok
+                    ? "成功（重连应免授权；若重启被清空则需重做）"
+                    : "失败（shell 可能无权写 /data/misc/adb）");
+            return sb.toString();
+        }
+    }
+
+    /**
      * 连接到本地 adbd (127.0.0.1:5555)
      * 连接成功后，所有命令将通过 adb shell 执行，获得 shell uid(2000) 权限
      */
@@ -262,6 +302,12 @@ public final class Sh {
                     synchronized (adbLock) {
                         if (adbClient != null && adbClient.isConnected()) {
                             detectUidAfterConnect();
+                            try {
+                                Logger.info(TAG, "授权固化: "
+                                        + persistKeyToDevice().replace("\n", " | "));
+                            } catch (Exception e) {
+                                Logger.warn(TAG, "授权固化异常: " + e.getMessage());
+                            }
                             notifyStateChanged();
                         }
                     }
@@ -308,9 +354,62 @@ public final class Sh {
         });
     }
 
-    /** 便捷方法：自动连接本地 adbd */
+    /**
+     * 自动连接本地 adbd（真机/模拟器通用）。
+     * 候选地址依次为 127.0.0.1 与 wlan0 自身 IP（应对 adbd 只绑 wlan0 接口的情况），
+     * 整体最多尝试 6 次、间隔 5s，任一成功即停，全败才放弃。
+     */
     public static void autoConnectLocal() {
-        autoConnect("127.0.0.1", 5555, 10000);
+        java.util.List<String> hosts = new ArrayList<>();
+        hosts.add("127.0.0.1");
+        String wlan = getWlanIp();
+        if (wlan != null && !hosts.contains(wlan)) hosts.add(wlan);
+        autoConnectMulti(hosts.toArray(new String[0]), 5555, 10000);
+    }
+
+    /** 多地址轮替自动连接（总尝试上限 6 次，候选地址按顺序循环）；每次失败原因落日志，不静默。 */
+    private static void autoConnectMulti(String[] hosts, int port, int timeoutMs) {
+        submitAsync(() -> {
+            for (int attempt = 1; attempt <= AUTO_CONNECT_MAX_ATTEMPTS; attempt++) {
+                String host = hosts[(attempt - 1) % hosts.length];
+                Logger.info(TAG, "自动连接 ADB（第" + attempt + "/" + AUTO_CONNECT_MAX_ATTEMPTS
+                        + "次）" + host + ":" + port + " ...");
+                if (connectAdb(host, port, timeoutMs) && isAdbConnected()) {
+                    Logger.ok(TAG, "自动连接成功（第" + attempt + "次，" + host + ":" + port + "）");
+                    return;
+                }
+                Logger.warn(TAG, "连接失败 " + host + ":" + port
+                        + "（adbd 未监听该地址、被 SELinux 拦截或未授权；详见命令日志）");
+                if (attempt < AUTO_CONNECT_MAX_ATTEMPTS) {
+                    try { Thread.sleep(AUTO_CONNECT_INTERVAL_MS); }
+                    catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+                }
+            }
+            Logger.warn(TAG, "自动连接 " + AUTO_CONNECT_MAX_ATTEMPTS
+                    + " 次均失败，停止自动连接（可点状态条手动连接）");
+        });
+    }
+
+    /** 取 wlan0 的 IPv4 地址（用于自动连接候选；失败返 null，不影响 127.0.0.1 尝试） */
+    private static String getWlanIp() {
+        try {
+            java.util.Enumeration<java.net.NetworkInterface> nis =
+                    java.net.NetworkInterface.getNetworkInterfaces();
+            while (nis.hasMoreElements()) {
+                java.net.NetworkInterface ni = nis.nextElement();
+                if (ni == null || !"wlan0".equals(ni.getName())) continue;
+                java.util.Enumeration<java.net.InetAddress> addrs = ni.getInetAddresses();
+                while (addrs.hasMoreElements()) {
+                    java.net.InetAddress a = addrs.nextElement();
+                    if (!a.isLoopbackAddress() && a instanceof java.net.Inet4Address) {
+                        return a.getHostAddress();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Logger.warn(TAG, "读取 wlan0 IP 失败: " + e.getMessage());
+        }
+        return null;
     }
 
     /** 断开 ADB 连接 */

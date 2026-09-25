@@ -21,7 +21,7 @@ public class LockCardView extends SpanCardView {
     private Listener listener;
 
     public LockCardView(Context context, int cornerDp) {
-        super(context, "整车锁 ⚠实验性", cornerDp);
+        super(context, "车门锁 ⚠实验性", cornerDp);
     }
 
     @Override

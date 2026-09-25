@@ -58,6 +58,20 @@ public class VehicleController {
     public boolean fogLightOff()  { return sendLegacy(ACTION_TO_CAR_CONTROL, "CARLIGHT_REARFOGCTL", 0); }
     public boolean positionLightOn()  { return sendLegacy(ACTION_TO_CAR_CONTROL, "CARLIGHT_SHEKUODENG", 1); }
     public boolean positionLightOff() { return sendLegacy(ACTION_TO_CAR_CONTROL, "CARLIGHT_SHEKUODENG", 0); }
+    // 远光（CarHeadUtils CARLIGHT_HIGHTCTRL，注意原车拼写为 HIGHT）
+    public boolean highBeamOn()    { return sendLegacy(ACTION_TO_CAR_CONTROL, "CARLIGHT_HIGHTCTRL", 1); }
+    public boolean highBeamOff()   { return sendLegacy(ACTION_TO_CAR_CONTROL, "CARLIGHT_HIGHTCTRL", 0); }
+    // 自动灯光（CARLIGHT_AURO，state=2=AUTO）
+    public boolean autoLights()    { return sendLegacy(ACTION_TO_CAR_CONTROL, "CARLIGHT_AURO", 2); }
+    // 关闭全部灯光（CARLIGHT_CLOSE，state=0）
+    public boolean closeAllLights(){ return sendLegacy(ACTION_TO_CAR_CONTROL, "CARLIGHT_CLOSE", 0); }
+    // 前雾灯（CARLIGHT_FRONTFOGCTL）
+    public boolean frontFogOn()    { return sendLegacy(ACTION_TO_CAR_CONTROL, "CARLIGHT_FRONTFOGCTL", 1); }
+    public boolean frontFogOff()   { return sendLegacy(ACTION_TO_CAR_CONTROL, "CARLIGHT_FRONTFOGCTL", 0); }
+    /** 阅读灯/氛围灯通用（CARLIGHT_*DOMELAMPCTRL，state 0关 1开），名字→通道归车辆层 */
+    public boolean domeLight(String type, boolean on) {
+        return sendLegacy(ACTION_TO_CAR_CONTROL, type, on ? 1 : 0);
+    }
 
     // ═══ 空调 — 混合通道 ═══
     public boolean acMaxOn()  { return sendLegacy(ACTION_TO_AIR_CONDITIONER, "HVACACMAXREQ", 1); }
@@ -147,9 +161,24 @@ public class VehicleController {
     public boolean rearDefrostOn()   { return putGlobal(K_REAR_DEFROST, "1"); }
     public boolean rearDefrostOff()  { return putGlobal(K_REAR_DEFROST, "0"); }
 
-    // ═══ 儿童锁 — handMessage（格式已验证）═══
+    // ═══ 其它 settings 真机键直控 ═══
+    public boolean mirrorHeatOn()    { return putGlobal("strCarMirrorHeart", "1"); }
+    public boolean mirrorHeatOff()   { return putGlobal("strCarMirrorHeart", "0"); }
+    public boolean windowForbitOn()  { return putGlobal("strCarWindowForbit", "1"); }
+    public boolean windowForbitOff() { return putGlobal("strCarWindowForbit", "0"); }
+    public boolean openAcPage()      { return putGlobal("strCar100006", "1"); }
+
+    /**
+     * 空调运行模式（strCarAirStatus：自动/制冷/制热/通风）。
+     * 各模式对应的整数值需真机切换并回读标定，故只提供 raw 写入，页面标注 ⚠ 待标定，不臆测枚举。
+     */
+    public boolean setAirStatusRaw(int mode) { return putGlobal("strCarAirStatus", String.valueOf(mode)); }
+
+    // ═══ 儿童锁 — handMessage（开/关成对，格式已验证）═══
     public boolean leftChildLockOn()  { return sendVoice("carControl", obj().put("operation", "OPEN").put("name", "左边儿童锁")); }
     public boolean rightChildLockOn() { return sendVoice("carControl", obj().put("operation", "OPEN").put("name", "右边儿童锁")); }
+    public boolean leftChildLockOff()  { return sendVoice("carControl", obj().put("operation", "CLOSE").put("name", "左边儿童锁")); }
+    public boolean rightChildLockOff() { return sendVoice("carControl", obj().put("operation", "CLOSE").put("name", "右边儿童锁")); }
 
     // ═══ 后备箱 — handMessage ═══
     public boolean openTrunk()  { return sendVoice("carControl", obj().put("operation", "OPEN").put("name", "后备箱")); }
@@ -259,7 +288,8 @@ public class VehicleController {
             Log.i(TAG, "Rightware: " + type + "=" + state);
             if (Sh.isAdbConnected()) {
                 String cls = RW_CLS.substring(RW_CLS.lastIndexOf('.') + 1);
-                String cmd = "am startservice -n " + RW_PKG + "/." + cls
+                // 与原车 SystemUI startForegroundService 对齐（Android 9 后台服务策略，startservice 可能不被执行）
+                String cmd = "am start-foreground-service -n " + RW_PKG + "/." + cls
                         + " --es type " + type + " --es state " + state;
                 Sh.Result r = Sh.run(cmd);
                 lastResult = r;

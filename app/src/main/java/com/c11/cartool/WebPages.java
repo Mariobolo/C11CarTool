@@ -20,6 +20,88 @@ public final class WebPages {
         return HTML.replace("__AUTH_TOKEN__", token);
     }
 
+    // ── 扫码测控信息（二维码 + URL + 同网段提示）──
+    public static final class WebInfo {
+        public final boolean running;
+        public final int port;
+        public final String token;
+        public final String ip;
+        public WebInfo(boolean running, int port, String token, String ip) {
+            this.running = running;
+            this.port = port;
+            this.token = token;
+            this.ip = ip;
+        }
+    }
+
+    /** 构建「手机扫码测控」弹窗内容：二维码（QrBitmap）+ 完整 URL + 同 WiFi 提示。 */
+    public static android.view.View buildInfoView(android.content.Context c, WebInfo info) {
+        android.widget.LinearLayout col = new android.widget.LinearLayout(c);
+        col.setOrientation(android.widget.LinearLayout.VERTICAL);
+        col.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+        col.setBackgroundColor(0xFF0A0E14);
+        int pad = dp(c, 16);
+        col.setPadding(pad, pad, pad, pad);
+
+        boolean ready = info.running && info.ip != null && !info.ip.isEmpty();
+        String url = ready ? ("http://" + info.ip + ":" + info.port + "/?t="
+                + (info.token == null ? "" : info.token)) : null;
+
+        if (url != null) {
+            android.widget.ImageView qr = new android.widget.ImageView(c);
+            qr.setImageBitmap(com.c11.cartool.util.QrBitmap.toBitmap(url, 8));
+            col.addView(qr, new android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+
+            android.widget.TextView u = new android.widget.TextView(c);
+            u.setText(url);
+            u.setTextColor(0xFF8B95A5);
+            u.setTextSize(11);
+            u.setTypeface(android.graphics.Typeface.MONOSPACE);
+            u.setGravity(android.view.Gravity.CENTER);
+            android.widget.LinearLayout.LayoutParams up = new android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+            up.topMargin = dp(c, 12);
+            col.addView(u, up);
+
+            android.widget.TextView tip = new android.widget.TextView(c);
+            tip.setText("手机连接同一 WiFi 后扫码，即可遥控与查看日志");
+            tip.setTextColor(0xFF5A6474);
+            tip.setTextSize(11);
+            tip.setGravity(android.view.Gravity.CENTER);
+            android.widget.LinearLayout.LayoutParams tp = new android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+            tp.topMargin = dp(c, 8);
+            col.addView(tip, tp);
+        } else {
+            android.widget.TextView no = new android.widget.TextView(c);
+            no.setText("Web 未启动或尚未获取 wlan0 IP，请稍候重试");
+            no.setTextColor(0xFFF59E0B);
+            no.setTextSize(12);
+            no.setGravity(android.view.Gravity.CENTER);
+            col.addView(no);
+        }
+        return col;
+    }
+
+    private static int dp(android.content.Context c, int v) {
+        return Math.round(v * c.getResources().getDisplayMetrics().density);
+    }
+
+    /** 生成车窗滑杆一行：名称 + range（拖动实时显值 / 松手 winSet 下发）+ 百分比文本。 */
+    private static String winSliderRow(String label, String area, String id) {
+        return "<div style='display:flex;align-items:center;gap:10px;padding:7px 2px'>"
+        + "<span style='min-width:44px;font-size:12px;color:var(--fg2)'>" + label + "</span>"
+        + "<input type='range' min='0' max='100' value='0' style='flex:1' id='" + id + "'"
+        + " oninput='document.getElementById(\"" + id + "_v\").textContent=this.value+\"%\"'"
+        + " onchange='winSet(\"" + area + "\",this.value)'>"
+        + "<span style='min-width:42px;text-align:right;font-size:12px;color:var(--blue)' id='"
+        + id + "_v'>0%</span></div>";
+    }
+
     private static final String HTML = "<!DOCTYPE html>"
 + "<html lang='zh-CN'><head>"
 + "<meta charset='UTF-8'>"
@@ -130,6 +212,12 @@ public final class WebPages {
 + "<div class='ctrl' onclick='cmd(\"fogLightOff\",this)'><span class='icon'>🌤️</span><span class='label'>雾灯关</span></div>"
 + "<div class='ctrl' onclick='cmd(\"positionLightOn\",this)'><span class='icon'>🔦</span><span class='label'>示廓开</span></div>"
 + "<div class='ctrl' onclick='cmd(\"positionLightOff\",this)'><span class='icon'>🔦</span><span class='label'>示廓关</span></div>"
++ "<div class='ctrl' onclick='cmd(\"highBeamOn\",this)'><span class='icon'>🔆</span><span class='label'>远光开</span></div>"
++ "<div class='ctrl' onclick='cmd(\"highBeamOff\",this)'><span class='icon'>🔅</span><span class='label'>远光关</span></div>"
++ "<div class='ctrl' onclick='cmd(\"frontFogOn\",this)'><span class='icon'>🌁</span><span class='label'>前雾开</span></div>"
++ "<div class='ctrl' onclick='cmd(\"frontFogOff\",this)'><span class='icon'>🌁</span><span class='label'>前雾关</span></div>"
++ "<div class='ctrl' onclick='cmd(\"autoLights\",this)'><span class='icon'>🌗</span><span class='label'>自动灯光</span></div>"
++ "<div class='ctrl' onclick='cmd(\"closeAllLights\",this)'><span class='icon'>🌑</span><span class='label'>关全部灯</span></div>"
 + "</div></div>"
 + "<div class='group'><div class='group-header'><span class='group-icon'>❄️</span><span class='group-title'>空调控制</span></div>"
 + "<div class='group-body'>"
@@ -141,17 +229,17 @@ public final class WebPages {
 + "<div class='ctrl' onclick='cmd(\"rearDefrost\",this)'><span class='icon'>🌬️</span><span class='label'>后除霜</span></div>"
 + "<div class='stepper'><button onclick='cmd(\"acTempDown\",this)'>−</button><div class='val' id='acTemp'>24°<small>温度</small></div><button onclick='cmd(\"acTempUp\",this)'>+</button></div>"
 + "<div class='stepper'><button onclick='cmd(\"acFanDown\",this)'>−</button><div class='val' id='acFan'>3<small>风量</small></div><button onclick='cmd(\"acFanUp\",this)'>+</button></div>"
++ "<div class='ctrl' onclick='airMode(0,this)'><span class='icon'>🔢</span><span class='label'>模式0</span></div>"
++ "<div class='ctrl' onclick='airMode(1,this)'><span class='icon'>🔢</span><span class='label'>模式1</span></div>"
++ "<div class='ctrl' onclick='airMode(2,this)'><span class='icon'>🔢</span><span class='label'>模式2</span></div>"
++ "<div class='ctrl' onclick='airMode(3,this)'><span class='icon'>🔢</span><span class='label'>模式3</span></div>"
 + "</div></div>"
-+ "<div class='group'><div class='group-header'><span class='group-icon'>🪟</span><span class='group-title'>车窗控制</span></div>"
-+ "<div class='group-body cols-4'>"
-+ "<div class='ctrl' onclick='cmd(\"windowFLUp\",this)'><span class='icon'>⬆️</span><span class='label'>主驾升</span></div>"
-+ "<div class='ctrl' onclick='cmd(\"windowFLDown\",this)'><span class='icon'>⬇️</span><span class='label'>主驾降</span></div>"
-+ "<div class='ctrl' onclick='cmd(\"windowFRUp\",this)'><span class='icon'>⬆️</span><span class='label'>副驾升</span></div>"
-+ "<div class='ctrl' onclick='cmd(\"windowFRDown\",this)'><span class='icon'>⬇️</span><span class='label'>副驾降</span></div>"
-+ "<div class='ctrl' onclick='cmd(\"windowRLUp\",this)'><span class='icon'>⬆️</span><span class='label'>左后升</span></div>"
-+ "<div class='ctrl' onclick='cmd(\"windowRLDown\",this)'><span class='icon'>⬇️</span><span class='label'>左后降</span></div>"
-+ "<div class='ctrl' onclick='cmd(\"windowRRUp\",this)'><span class='icon'>⬆️</span><span class='label'>右后升</span></div>"
-+ "<div class='ctrl' onclick='cmd(\"windowRRDown\",this)'><span class='icon'>⬇️</span><span class='label'>右后降</span></div>"
++ "<div class='group'><div class='group-header'><span class='group-icon'>🪟</span><span class='group-title'>车窗开度（拖动松手即设定）</span></div>"
++ "<div class='group-body' style='grid-template-columns:1fr'>"
++ winSliderRow("主驾","front_left","win_fl")
++ winSliderRow("副驾","front_right","win_fr")
++ winSliderRow("左后","rear_left","win_rl")
++ winSliderRow("右后","rear_right","win_rr")
 + "</div></div>"
 + "<div class='group'><div class='group-header'><span class='group-icon'>⚙️</span><span class='group-title'>其他控制</span></div>"
 + "<div class='group-body cols-3'>"
@@ -198,6 +286,14 @@ public final class WebPages {
 + "toast('网络错误: '+e.message,'err');"
 + "});"
 + "}"
++ "function winSet(win,pct){"
++ "fetch('/api/control',{method:'POST',headers:authHeaders(),body:JSON.stringify({action:'setWindow',window:win,percent:parseInt(pct)})})"
++ ".then(function(r){return r.json()}).then(function(d){toast(d.success?(win+' 车窗 '+pct+'%'):('失败:'+(d.error||'')),d.success?'ok':'err');})"
++ ".catch(function(e){toast('网络错误','err')});}"
++ "function airMode(mode){"
++ "fetch('/api/control',{method:'POST',headers:authHeaders(),body:JSON.stringify({action:'airStatus',mode:mode})})"
++ ".then(function(r){return r.json()}).then(function(d){toast(d.success?'模式已下发,观察实车标定':('失败:'+(d.error||'')),d.success?'ok':'err');})"
++ ".catch(function(e){toast('网络错误','err')});}"
 + "function refreshStatus(){"
 + "fetch('/api/info').then(function(r){return r.json()}).then(function(d){"
 + "var dot=document.getElementById('connDot'),txt=document.getElementById('connText');"

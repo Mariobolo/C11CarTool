@@ -102,11 +102,28 @@ public final class LogcatVehicleSource {
         enu(9121, "制动灯", G_LIGHT, enums(0, "关", 1, "开"));
         enu(14130, "刹车灯", G_LIGHT, enums(0, "关", 1, "开"));
         enu(1716, "大灯总状态", G_LIGHT, enums(0, "关", 1, "开"));
+        // 远光（BCM_HIGHBEAMCTRL=9114）与自动远光（IVI_AUTOHIGHBEAMEN=17111）
+        enu(9114, "远光灯", G_LIGHT, enums(0, "关", 1, "开"));
+        enu(17111, "自动远光", G_LIGHT, enums(0, "关", 1, "开"));
+        // 原车 CarHeadUtils 灯光 opcode（SomeIP event，4 位编号体系；与 5 位 eventId 互为多渠道）
+        enu(1000, "前雾灯", G_LIGHT, enums(0, "关", 1, "开"));
+        enu(1001, "灯光总开关", G_LIGHT, enums(0, "关", 1, "开"));
+        enu(1002, "示廓灯", G_LIGHT, enums(0, "关", 1, "开"));
+        enu(1003, "近光灯", G_LIGHT, enums(0, "关", 1, "开"));
+        enu(1005, "远光灯", G_LIGHT, enums(0, "关", 1, "开"));
+        enu(1006, "后雾灯", G_LIGHT, enums(0, "关", 1, "开"));
+        enu(1007, "前阅读灯", G_LIGHT, enums(0, "关", 1, "开"));
+        enu(1008, "后阅读灯", G_LIGHT, enums(0, "关", 1, "开"));
+        enu(1009, "前左阅读灯", G_LIGHT, enums(0, "关", 1, "开"));
+        enu(1010, "前右阅读灯", G_LIGHT, enums(0, "关", 1, "开"));
+        enu(1011, "后左阅读灯", G_LIGHT, enums(0, "关", 1, "开"));
+        enu(1012, "后右阅读灯", G_LIGHT, enums(0, "关", 1, "开"));
 
         // 动力电池 / 能耗
         num(3130, "电池总电压", "V", G_SYS);
         num(3131, "电池总电流", "A", G_SYS);
         num(3162, "电量", "%", G_SYS);
+        num(301, "续航(SomeIP)", "km", G_SYS);
 
         // 空调
         enu(28101, "空调开关", G_HVAC, enums(0, "关", 1, "开"));

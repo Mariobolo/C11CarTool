@@ -2,713 +2,669 @@ package com.c11.cartool.dashboard;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.content.Intent;
-import android.graphics.Bitmap;
+import android.content.res.Configuration;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.Handler;
-import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
-import android.widget.ImageView;
+import android.view.WindowManager;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.widget.ViewSwitcher;
+import android.widget.ViewFlipper;
 
 import com.c11.cartool.AppInfo;
 import com.c11.cartool.CrashHandler;
+import com.c11.cartool.DiagnosticRunner;
+import com.c11.cartool.LogExport;
 import com.c11.cartool.Logger;
-import com.c11.cartool.MainActivity;
 import com.c11.cartool.Sh;
+import com.c11.cartool.WebPages;
 import com.c11.cartool.WebServer;
-import com.c11.cartool.util.QrBitmap;
 import com.c11.cartool.vehicle.VehicleController;
 
-import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.Locale;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.Callable;
 
 /**
- * C11 车控 v0.3.5 —— 公开发布版仪表盘（打开即桌面）。
+ * 仪表盘主界面（车机横屏全屏，基于 {@link Activity}，不依赖 AndroidX）。
  *
- * <p>布局：顶部状态条（ADB/档位/车速/电量/时间/Web/工程） + 固定网格卡片（数据方块/车控按钮/工具入口） + 底部 Dock。
- * <p>数据：{@link DashboardRepository} 每 5s 采集 settings 真机键 + logcat 实时量，无值一律 "--"。
- * <p>车控：只接 VehicleController 已验证方法；锁车/后备箱/车窗等标注 ⚠ 实验性照常放出。
- * <p>工程模式：右上角进入 MainActivity（一键全测/诊断/车控实验/25 类参数浏览等调试工具）。
+ * <p>三页结构（{@link ViewFlipper}）：
+ * <ul>
+ *   <li>页0 仪表盘：固定网格，数据方块 + 车控卡片；</li>
+ *   <li>页1 全车信号清单（状态条「📊 信号」进入，支持搜索 / 折叠）；</li>
+ *   <li>页2 全部车控（状态条「🎛 车控」进入，全量车控平铺、多通道候选）。</li>
+ * </ul>
+ * 数据采集由 {@link DashboardRepository} 后台线程 5s 一轮驱动；不设工程模式，
+ * 一键诊断、日志导出、手机扫码测控均在前端直达。
  */
-public class DashboardActivity extends Activity {
+public class DashboardActivity extends Activity implements DashboardRepository.Callback {
 
-    private Handler h;
     private VehicleController vc;
     private WebServer webServer;
     private DashboardRepository repository;
-    private DashboardSnapshot lastSnap = new DashboardSnapshot();
 
-    // 内容区两页：仪表盘网格 / 全车信号清单
-    private ViewSwitcher contentSwitcher;
+    private ViewFlipper pageSwitcher;
     private SignalListPage signalPage;
-    private TextView signalChip;
-    private ExecutorService controlPool = Executors.newSingleThreadExecutor();
+    private ControlListPage controlPage;
 
-    // 状态条
-    private TextView adbStatusView;
-    private TextView statusChipsView;   // 档位/车速/电量
-    private TextView timeView;
-    private TextView webView;
-
-    // 卡片
-    private DataCardView batteryCard;
-    private DataCardView outsideTempCard;
-    private DataCardView voltageCard;
-    private DataCardView musicVolCard;
-    private DataCardView naviVolCard;
-    private DataCardView speechVolCard;
-    private DataCardView pm25Card;
+    // 数据卡
+    private DataCardView powerCard, outTempCard, mediaVolCard, naviVolCard, speechVolCard, callVolCard;
     private HvacCardView hvacCard;
     private TiresCardView tiresCard;
     private DoorsCardView doorsCard;
-    private LockCardView lockCard;
-    private MiniGridCardView lightsCard;
-    private WindowCardView windowsCard;
-    private MiniGridCardView extraCard;
+    private DataCardView spanCard;
 
-    private volatile boolean is720 = false;
-    private final Sh.StateListener adbListener = this::onAdbStateChanged;
+    // 车控卡
+    private WindowCardView windowCard;
+    private MiniGridCardView trunkCard;
+
+    // 状态条
+    private TextView adbChip, gearChip, speedChip, powerChip, timeChip, webChip;
+
+    /** 最近一次快照（状态条与步进基准读取） */
+    private volatile DashboardSnapshot latest;
+
+    private Sh.StateListener stateListener;
+
+    private final Handler ui = new Handler();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        h = new Handler(Looper.getMainLooper());
         CrashHandler.install(this);
 
-        Sh.setContext(this);
-        vc = new VehicleController(this);
+        // 横屏 + 全屏沉浸 + 常亮
+        setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        enterImmersive();
 
-        // Web 服务随启动（失败不阻塞；Dock/状态条可手动重试）
+        vc = new VehicleController(this);
         webServer = new WebServer();
         webServer.setVehicleController(vc);
-        try { startWebAuto(); } catch (Exception e) { Logger.error("Web 自启异常: " + e.getMessage()); }
 
-        Sh.startKeepAlive();
-        // 打开 App 即自动尝试连接 ADB（6 次重试、间隔 5s，全败才放弃），无需手动点
+        Logger.clearCmdLog();
+        Logger.title(AppInfo.TITLE + " 启动");
+        Logger.info("设备: " + android.os.Build.MODEL + "，Android " + android.os.Build.VERSION.RELEASE);
+
+        buildUi();
+        startWebAuto();
+
+        Sh.setContext(this);
+        stateListener = new Sh.StateListener() {
+            @Override public void onAdbStateChanged(boolean connected, int uid) {
+                ui.post(DashboardActivity.this::updateStatusBar);
+            }
+        };
+        Sh.addStateListener(stateListener);
+        Sh.startKeepAlive();   // 心跳保活：断线自动重连 + uid 周期刷新（幂等；此前仅旧 MainActivity 启动，导致 Dashboard 断线不重连）
+        // ADB：打开即自动连接（多地址候选、最多 6 次）
         Sh.autoConnectLocal();
-        Sh.addStateListener(adbListener);
 
-        setContentView(buildUI());
-        bindCardActions();
-
-        repository = new DashboardRepository(h, this::onSnapshot);
-        // 采集在 onResume 启动（此时视图已挂载、卡片 buildContent 已完成，避免首帧竞争）
-
-        startClock();
+        // 数据采集：后台线程 5s 一轮
+        repository = new DashboardRepository(ui, this);
+        repository.start();
     }
 
-    // ═════════════ UI 构建 ═════════
+    // ═══════════════════════════════════════════════
+    //  UI 构建
+    // ═══════════════════════════════════════════════
 
-    private View buildUI() {
+    private void buildUi() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(DashboardTheme.BG);
 
-        root.addView(buildStatusBar());
+        root.addView(buildStatusBar(), new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
 
-        // 内容区：ViewSwitcher 在「仪表盘网格」与「全车信号清单」两页间切换
-        contentSwitcher = new ViewSwitcher(this);
-        contentSwitcher.setInAnimation(this, android.R.anim.fade_in);
-        contentSwitcher.setOutAnimation(this, android.R.anim.fade_out);
-
-        DashboardGridView grid = new DashboardGridView(this, 12, rows(), marginDp(), gapDp());
-        contentSwitcher.addView(grid, new ViewSwitcher.LayoutParams(
-                ViewSwitcher.LayoutParams.MATCH_PARENT, ViewSwitcher.LayoutParams.MATCH_PARENT));
-        buildGridCards(grid);
+        pageSwitcher = new ViewFlipper(this);
+        pageSwitcher.setAutoStart(false);
+        pageSwitcher.setInAnimation(this, android.R.anim.fade_in);
+        pageSwitcher.setOutAnimation(this, android.R.anim.fade_out);
+        pageSwitcher.addView(buildGridPage());
 
         signalPage = new SignalListPage(this);
-        contentSwitcher.addView(signalPage, new ViewSwitcher.LayoutParams(
-                ViewSwitcher.LayoutParams.MATCH_PARENT, ViewSwitcher.LayoutParams.MATCH_PARENT));
+        pageSwitcher.addView(signalPage);
 
-        root.addView(contentSwitcher, new LinearLayout.LayoutParams(
+        controlPage = new ControlListPage(this, vc, new ControlListPage.CommandRunner() {
+            @Override public void run(String label, Callable<Boolean> task) {
+                runCommand(label, task);
+            }
+        });
+        pageSwitcher.addView(controlPage);
+
+        root.addView(pageSwitcher, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        root.addView(buildDock(), new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(52)));
 
-        root.addView(buildDock());
-
-        return root;
+        setContentView(root);
     }
 
-    private boolean isTallScreen() {
-        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
-        return dm.heightPixels >= 900;
+    private View buildGridPage() {
+        boolean compact = isCompactScreen();
+        DashboardGridView grid = new DashboardGridView(this, 12, compact ? 4 : 7, 16, 10);
+
+        powerCard = new DataCardView(this, "电量 / 续航 / 电压", 12);
+        hvacCard = new HvacCardView(this, compact, 12);
+        outTempCard = new DataCardView(this, "车外温度", 10);
+        mediaVolCard = new DataCardView(this, "媒体音量", 10);
+        naviVolCard = new DataCardView(this, "导航音量", 10);
+        speechVolCard = new DataCardView(this, "语音", 10);
+        callVolCard = new DataCardView(this, "通话音量", 10);
+        tiresCard = new TiresCardView(this, 12);
+        doorsCard = new DoorsCardView(this, 12);
+        spanCard = new DataCardView(this, "功率 / 电流", 12);
+
+        if (compact) buildCompactGrid(grid);
+        else build1080Grid(grid);
+
+        bindCardActions();
+        return grid;
     }
 
-    private int rows() { is720 = !isTallScreen(); return is720 ? 4 : 7; }
-    private int marginDp() { return is720 ? 12 : 16; }
-    private int gapDp() { return is720 ? 8 : 10; }
-    private int cornerDp() { return is720 ? 12 : 16; }
+    /** 中控 1920×1080：12 列 × 7 行 */
+    private void build1080Grid(DashboardGridView grid) {
+        // 数据区 row0-3
+        grid.addCard(powerCard, 0, 0, 3, 2);
+        grid.addCard(hvacCard, 3, 0, 4, 4);
+        grid.addCard(outTempCard, 7, 0, 2, 1);
+        grid.addCard(mediaVolCard, 9, 0, 2, 1);
+        grid.addCard(naviVolCard, 7, 1, 2, 1);
+        grid.addCard(speechVolCard, 11, 0, 1, 2);
+        grid.addCard(callVolCard, 9, 1, 2, 1);
+        grid.addCard(tiresCard, 0, 2, 6, 2);
+        grid.addCard(doorsCard, 6, 2, 3, 2);
+        grid.addCard(spanCard, 9, 2, 3, 2);
 
-    // ── 顶部状态条 ──
+        // 车控区 row4-6
+        windowCard = new WindowCardView(this, false);
+        grid.addCard(windowCard, 0, 4, 4, 1);
+
+        MiniGridCardView lightCard = new MiniGridCardView(this, "灯光（旧语音广播）",
+                java.util.Arrays.asList(
+                        new MiniGridCardView.Item("low_on", "近光开", "💡", false),
+                        new MiniGridCardView.Item("low_off", "近光关", "💡", false),
+                        new MiniGridCardView.Item("high_on", "远光开", "🔆", false),
+                        new MiniGridCardView.Item("high_off", "远光关", "🔅", false),
+                        new MiniGridCardView.Item("pos_on", "示廓开", "🔦", false),
+                        new MiniGridCardView.Item("pos_off", "示廓关", "🔦", false),
+                        new MiniGridCardView.Item("fog_on", "后雾开", "🌫", false),
+                        new MiniGridCardView.Item("fog_off", "后雾关", "🌫", false)), 10);
+        lightCard.setListener(this::onMiniToggle);
+        grid.addCard(lightCard, 4, 4, 4, 2);
+
+        MiniGridCardView childCard = new MiniGridCardView(this, "儿童锁（handMessage）",
+                java.util.Arrays.asList(
+                        new MiniGridCardView.Item("child_l_on", "左锁开", "🔒", false),
+                        new MiniGridCardView.Item("child_l_off", "左锁关", "🔓", false),
+                        new MiniGridCardView.Item("child_r_on", "右锁开", "🔒", false),
+                        new MiniGridCardView.Item("child_r_off", "右锁关", "🔓", false)), 10);
+        childCard.setListener(this::onMiniToggle);
+        grid.addCard(childCard, 8, 4, 2, 2);
+
+        trunkCard = new MiniGridCardView(this, "后备箱",
+                java.util.Arrays.asList(
+                        new MiniGridCardView.Item("trunk_open", "开", "📂", false),
+                        new MiniGridCardView.Item("trunk_close", "关", "📁", false)), 10);
+        trunkCard.setListener(this::onMiniToggle);
+        grid.addCard(trunkCard, 10, 4, 2, 1);
+
+        MiniGridCardView otherCard = new MiniGridCardView(this, "其它（settings）",
+                java.util.Arrays.asList(
+                        new MiniGridCardView.Item("mirror_on", "镜加热开", "♨", false),
+                        new MiniGridCardView.Item("mirror_off", "镜加热关", "♨", false),
+                        new MiniGridCardView.Item("winlock_on", "车窗锁开", "🚫", false),
+                        new MiniGridCardView.Item("winlock_off", "车窗锁关", "✅", false),
+                        new MiniGridCardView.Item("ac_page", "空调界面", "🌀", false)), 10);
+        otherCard.setListener(this::onMiniToggle);
+        grid.addCard(otherCard, 0, 5, 4, 2);
+
+        ToolEntryCardView scanEntry = new ToolEntryCardView(this, "手机扫码测控", "📱", 10);
+        scanEntry.setListener(card -> showWebInfoDialog());
+        grid.addCard(scanEntry, 10, 5, 2, 1);
+
+        LockCardView lockCard = new LockCardView(this, 12);
+        grid.addCard(lockCard, 4, 6, 4, 1);
+
+        ToolEntryCardView diagEntry = new ToolEntryCardView(this, "一键诊断", "🩺", 10);
+        diagEntry.setListener(card -> runDiagnostic());
+        grid.addCard(diagEntry, 8, 6, 2, 1);
+
+        ToolEntryCardView logEntry = new ToolEntryCardView(this, "导出日志", "📋", 10);
+        logEntry.setListener(card -> exportLogs());
+        grid.addCard(logEntry, 10, 6, 2, 1);
+    }
+
+    /** 仪表 / 副驾 1920×720：12 列 × 4 行（完整车控请进「🎛 车控」页） */
+    private void buildCompactGrid(DashboardGridView grid) {
+        grid.addCard(powerCard, 0, 0, 3, 1);
+        grid.addCard(hvacCard, 3, 0, 4, 2);
+        grid.addCard(outTempCard, 7, 0, 2, 1);
+        grid.addCard(mediaVolCard, 9, 0, 2, 1);
+        grid.addCard(speechVolCard, 11, 0, 1, 2);
+        grid.addCard(naviVolCard, 7, 1, 2, 1);
+        grid.addCard(callVolCard, 9, 1, 2, 1);
+
+        grid.addCard(tiresCard, 0, 2, 6, 1);
+        grid.addCard(doorsCard, 6, 2, 6, 1);
+
+        LockCardView lockCard = new LockCardView(this, 10);
+        grid.addCard(lockCard, 0, 3, 4, 1);
+
+        ToolEntryCardView scanEntry = new ToolEntryCardView(this, "扫码测控", "📱", 10);
+        scanEntry.setListener(card -> showWebInfoDialog());
+        grid.addCard(scanEntry, 4, 3, 2, 1);
+
+        ToolEntryCardView diagEntry = new ToolEntryCardView(this, "诊断", "🩺", 10);
+        diagEntry.setListener(card -> runDiagnostic());
+        grid.addCard(diagEntry, 6, 3, 2, 1);
+
+        ToolEntryCardView logEntry = new ToolEntryCardView(this, "日志", "📋", 10);
+        logEntry.setListener(card -> exportLogs());
+        grid.addCard(logEntry, 8, 3, 2, 1);
+
+        trunkCard = new MiniGridCardView(this, "后备箱",
+                java.util.Arrays.asList(
+                        new MiniGridCardView.Item("trunk_open", "开", "📂", false),
+                        new MiniGridCardView.Item("trunk_close", "关", "📁", false)), 10);
+        trunkCard.setListener(this::onMiniToggle);
+        grid.addCard(trunkCard, 10, 3, 2, 1);
+    }
+
+    // ═══════════════════════════════════════════════
+    //  状态条
+    // ═══════════════════════════════════════════════
+
     private View buildStatusBar() {
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setBackgroundColor(DashboardTheme.SURFACE);
-        bar.setPadding(dp(14), dp(8), dp(8), dp(8));
+        bar.setPadding(dp(10), 0, dp(10), 0);
 
-        // 版本号（第一屏可辨，防止安装旧包白跑）
-        TextView verView = chip("🚗 v" + AppInfo.VERSION, DashboardTheme.CYAN);
-        verView.setTypeface(Typeface.DEFAULT_BOLD);
-        bar.addView(verView, chipLp());
+        adbChip = chip("🔌 连接中…", true, v -> { showPage(0); Sh.autoConnectLocal(); });
+        gearChip = chip("档位 --", false, v -> showPage(0));
+        speedChip = chip("车速 --", false, v -> showPage(0));
+        powerChip = chip("电量 --", false, v -> showPage(0));
+        timeChip = chip("时间 --", false, v -> showPage(0));
+        TextView signalChip = chip("📊 信号", true, v -> showPage(1));
+        TextView controlChip = chip("🎛 车控", true, v -> showPage(2));
+        webChip = chip("🌐 Web: 启动中…", true, v -> showWebInfoDialog());
 
-        // ADB 状态（点击连接）
-        adbStatusView = chip("ADB", DashboardTheme.RED);
-        adbStatusView.setOnClickListener(v -> {
-            if (!Sh.isAdbConnected()) {
-                runBackground("连接 ADB", () -> {
-                    boolean ok = Sh.connectLocalAdb();
-                    post(() -> Toast.makeText(this, ok ? "ADB 已连接" : "ADB 连接失败（详见工程模式）",
-                            Toast.LENGTH_SHORT).show());
-                });
-            } else {
-                showWebInfoDialog(true);
-            }
-        });
-        bar.addView(adbStatusView, chipLp());
-
-        statusChipsView = chip("档 - / 速 - / 电 -", DashboardTheme.TEXT);
-        bar.addView(statusChipsView, chipLp());
-
-        // Web 状态
-        webView = chip("Web 关", DashboardTheme.DIM);
-        webView.setOnClickListener(v -> showWebInfoDialog(false));
-        bar.addView(webView, chipLp());
-
-        // 全车信号清单（点击切换整页）
-        signalChip = chip("📊 信号", DashboardTheme.CYAN);
-        signalChip.setOnClickListener(v -> toggleSignalPage());
-        bar.addView(signalChip, chipLp());
-
-        // 时间
-        timeView = new TextView(this);
-        timeView.setTextColor(DashboardTheme.TEXT);
-        timeView.setTextSize(16);
-        timeView.setTypeface(Typeface.DEFAULT_BOLD);
-        timeView.setGravity(Gravity.CENTER_VERTICAL);
-        bar.addView(timeView, chipLp());
-
-        // 工程模式
-        TextView eng = chip("⚙ 工程", DashboardTheme.PURPLE);
-        eng.setOnClickListener(v -> startActivity(new Intent(this, MainActivity.class)));
-        bar.addView(eng, chipLp());
-
+        bar.addView(adbChip);
+        bar.addView(gearChip);
+        bar.addView(speedChip);
+        bar.addView(powerChip);
+        bar.addView(timeChip);
+        View spacer = new View(this);
+        bar.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1f));
+        bar.addView(signalChip);
+        bar.addView(controlChip);
+        bar.addView(webChip);
         return bar;
     }
 
-    /** 在仪表盘网格与全车信号清单之间切换，chip 文案随页变化。 */
-    private void toggleSignalPage() {
-        boolean toList = contentSwitcher.getDisplayedChild() == 0;
-        contentSwitcher.setDisplayedChild(toList ? 1 : 0);
-        signalChip.setText(toList ? "← 仪表盘" : "📊 信号");
+    private interface ChipClick { void onClick(View v); }
+
+    private TextView chip(String text, boolean strong, final ChipClick click) {
+        TextView t = new TextView(this);
+        t.setText(text);
+        t.setTextColor(strong ? DashboardTheme.CYAN : DashboardTheme.TEXT);
+        t.setTextSize(12);
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(dp(10), 0, dp(10), 0);
+        if (click != null) t.setOnClickListener(click::onClick);
+        return t;
     }
 
-    private TextView chip(String text, int color) {
-        TextView tv = new TextView(this);
-        tv.setText(text);
-        tv.setTextColor(color);
-        tv.setTextSize(12);
-        tv.setPadding(dp(8), dp(4), dp(8), dp(4));
-        return tv;
+    private void showPage(int idx) {
+        if (pageSwitcher.getDisplayedChild() != idx) pageSwitcher.setDisplayedChild(idx);
     }
 
-    private LinearLayout.LayoutParams chipLp() {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.setMargins(dp(2), 0, dp(2), 0);
-        return lp;
-    }
+    // ═══════════════════════════════════════════════
+    //  Dock（底部快捷）
+    // ═══════════════════════════════════════════════
 
-    // ── 网格卡片 ──
-    private void buildGridCards(DashboardGridView grid) {
-        int c = cornerDp();
-
-        if (!is720) {
-            // ── 中控 1920×1080：12×7 ──
-            batteryCard = new DataCardView(this, "电量 / 续航 / 电压", c);
-            batteryCard.setChannel("event/node");
-            grid.addCard(batteryCard, 0, 0, 3, 2);
-
-            hvacCard = new HvacCardView(this, false, c);
-            grid.addCard(hvacCard, 3, 0, 4, 4);
-
-            outsideTempCard = new DataCardView(this, "车外温度", c);
-            outsideTempCard.setChannel("event");
-            grid.addCard(outsideTempCard, 7, 0, 2, 1);
-
-            musicVolCard = new DataCardView(this, "媒体音量", c);
-            musicVolCard.setChannel("settings");
-            grid.addCard(musicVolCard, 9, 0, 2, 1);
-
-            voltageCard = new DataCardView(this, "电池电压", c);
-            voltageCard.setChannel("event");
-            grid.addCard(voltageCard, 7, 1, 2, 1);
-
-            speechVolCard = new DataCardView(this, "语音音量", c);
-            speechVolCard.setChannel("settings");
-            grid.addCard(speechVolCard, 9, 1, 2, 1);
-
-            doorsCard = new DoorsCardView(this, c);
-            grid.addCard(doorsCard, 0, 2, 3, 2);
-
-            tiresCard = new TiresCardView(this, c);
-            grid.addCard(tiresCard, 7, 2, 2, 2);
-
-            naviVolCard = new DataCardView(this, "导航音量", c);
-            naviVolCard.setChannel("settings");
-            grid.addCard(naviVolCard, 9, 2, 2, 1);
-
-            pm25Card = new DataCardView(this, "车内 PM2.5", c);
-            pm25Card.setChannel("settings");
-            grid.addCard(pm25Card, 9, 3, 2, 1);
-
-            // 第 5 行：车窗档位卡 / 灯光 / 儿童锁 / 后备箱（一排）
-            windowsCard = new WindowCardView(this, false);
-            grid.addCard(windowsCard, 0, 4, 4, 1);
-
-            lightsCard = new MiniGridCardView(this, "灯光",
-                    new ArrayList<MiniGridCardView.Item>() {{
-                        add(new MiniGridCardView.Item("low_beam", "近光", "💡", false));
-                        add(new MiniGridCardView.Item("position", "示廓", "🚥", false));
-                        add(new MiniGridCardView.Item("fog", "后雾", "🌫", false));
-                        add(new MiniGridCardView.Item("view360", "360", "📷", false));
-                    }}, c);
-            grid.addCard(lightsCard, 4, 4, 4, 1);
-
-            MiniGridCardView childCard = new MiniGridCardView(this, "儿童锁",
-                    new ArrayList<MiniGridCardView.Item>() {{
-                        add(new MiniGridCardView.Item("child_l", "左", "🔒", false));
-                        add(new MiniGridCardView.Item("child_r", "右", "🔒", false));
-                    }}, c);
-            childCard.setListener(this::onMiniToggle);
-            grid.addCard(childCard, 8, 4, 2, 1);
-
-            MiniGridCardView trunkCard = new MiniGridCardView(this, "后备箱⚠",
-                    new ArrayList<MiniGridCardView.Item>() {{
-                        add(new MiniGridCardView.Item("trunk_open", "开", "🚪", true));
-                        add(new MiniGridCardView.Item("trunk_close", "关", "🚪", true));
-                    }}, c);
-            trunkCard.setListener(this::onMiniToggle);
-            grid.addCard(trunkCard, 10, 4, 2, 1);
-
-            // 第 6 行：工具条
-            grid.addCard(makeToolCard("🌐", "Web 遥控", () -> showWebInfoDialog(false)), 0, 5, 2, 1);
-            grid.addCard(makeToolCard("🧪", "一键诊断", () -> openEngine("诊断")), 2, 5, 2, 1);
-            grid.addCard(makeToolCard("⚙", "一键全测", () -> openEngine("全测")), 4, 5, 2, 1);
-            grid.addCard(makeToolCard("🎮", "车控实验", () -> openEngine("实验")), 6, 5, 2, 1);
-            grid.addCard(makeToolCard("📋", "日志导出", () -> openEngine("日志")), 8, 5, 2, 1);
-            grid.addCard(makeToolCard("⚙", "工程模式", () -> startActivity(new Intent(this, MainActivity.class))), 10, 5, 2, 1);
-
-            // 第 7 行：锁车大卡 / 其它开关 / 快捷工具
-            lockCard = new LockCardView(this, c);
-            grid.addCard(lockCard, 0, 6, 4, 1);
-
-            extraCard = new MiniGridCardView(this, "其它⚠",
-                    new ArrayList<MiniGridCardView.Item>() {{
-                        add(new MiniGridCardView.Item("mirror_heat", "镜加热", "♨", true));
-                        add(new MiniGridCardView.Item("window_forbit", "窗锁", "🔐", true));
-                        add(new MiniGridCardView.Item("max_cool", "最大制冷", "❄", false));
-                        add(new MiniGridCardView.Item("ac_page", "空调界面", "🖥", false));
-                    }}, c);
-            grid.addCard(extraCard, 4, 6, 4, 1);
-
-            grid.addCard(makeToolCard("🔊", "音量", () -> openEngine("音量")), 8, 6, 2, 1);
-            grid.addCard(makeToolCard("📡", "网络", () -> showWebInfoDialog(false)), 10, 6, 2, 1);
-        } else {
-            // ── 仪表/副驾 1920×720：12×4 精简 ──
-            batteryCard = new DataCardView(this, "电量 / 续航 / 电压", c);
-            batteryCard.setChannel("event/node");
-            grid.addCard(batteryCard, 0, 0, 3, 2);
-
-            hvacCard = new HvacCardView(this, true, c);
-            grid.addCard(hvacCard, 3, 0, 4, 2);
-
-            outsideTempCard = new DataCardView(this, "车外温度", c);
-            outsideTempCard.setChannel("event");
-            grid.addCard(outsideTempCard, 7, 0, 2, 1);
-
-            musicVolCard = new DataCardView(this, "媒体音量", c);
-            musicVolCard.setChannel("settings");
-            grid.addCard(musicVolCard, 9, 0, 2, 1);
-
-            voltageCard = new DataCardView(this, "电池电压", c);
-            voltageCard.setChannel("event");
-            grid.addCard(voltageCard, 7, 1, 2, 1);
-
-            speechVolCard = new DataCardView(this, "语音音量", c);
-            speechVolCard.setChannel("settings");
-            grid.addCard(speechVolCard, 9, 1, 2, 1);
-
-            doorsCard = new DoorsCardView(this, c);
-            grid.addCard(doorsCard, 0, 2, 3, 2);
-
-            lightsCard = new MiniGridCardView(this, "灯光 / 车身",
-                    new ArrayList<MiniGridCardView.Item>() {{
-                        add(new MiniGridCardView.Item("low_beam", "近光", "💡", false));
-                        add(new MiniGridCardView.Item("position", "示廓", "🚥", false));
-                        add(new MiniGridCardView.Item("fog", "后雾", "🌫", false));
-                        add(new MiniGridCardView.Item("view360", "360", "📷", false));
-                        add(new MiniGridCardView.Item("child_l", "左童锁", "🔒", false));
-                        add(new MiniGridCardView.Item("child_r", "右童锁", "🔒", false));
-                        add(new MiniGridCardView.Item("trunk_open", "后备箱开", "🚪", true));
-                        add(new MiniGridCardView.Item("trunk_close", "后备箱关", "🚪", true));
-                    }}, c);
-            grid.addCard(lightsCard, 3, 2, 4, 2);
-
-            tiresCard = new TiresCardView(this, c);
-            grid.addCard(tiresCard, 7, 2, 2, 2);
-
-            naviVolCard = new DataCardView(this, "导航音量", c);
-            naviVolCard.setChannel("settings");
-            grid.addCard(naviVolCard, 9, 2, 2, 1);
-
-            pm25Card = new DataCardView(this, "PM2.5", c);
-            pm25Card.setChannel("settings");
-            grid.addCard(pm25Card, 9, 3, 2, 1);
-
-            windowsCard = new WindowCardView(this, true);
-            grid.addCard(windowsCard, 0, 3, 4, 1);
-
-            lockCard = new LockCardView(this, c);
-            grid.addCard(lockCard, 4, 3, 4, 1);
-
-            grid.addCard(makeToolCard("⚙", "工程", () -> startActivity(new Intent(this, MainActivity.class))), 8, 3, 2, 1);
-        }
-    }
-
-    private ToolEntryCardView makeToolCard(String emoji, String name, Runnable action) {
-        ToolEntryCardView card = new ToolEntryCardView(this, name, emoji, cornerDp());
-        card.setListener(c -> action.run());
-        return card;
-    }
-
-    private void openEngine(String hint) {
-        // 跳工程模式（MainActivity），并 toast 提示位置
-        Toast.makeText(this, "工程模式 → " + hint + "（在下方标签页内）", Toast.LENGTH_SHORT).show();
-        startActivity(new Intent(this, MainActivity.class));
-    }
-
-    // ── 底部 Dock ──
     private View buildDock() {
         LinearLayout dock = new LinearLayout(this);
         dock.setOrientation(LinearLayout.HORIZONTAL);
         dock.setGravity(Gravity.CENTER);
         dock.setBackgroundColor(DashboardTheme.SURFACE);
-        dock.setPadding(dp(8), dp(6), dp(8), dp(6));
 
-        dock.addView(dockBtn("❄ 空调", true, () -> hvacToggle("ac", !isAcOn())));
-        dock.addView(dockBtn("💧 前除雾", false, () -> hvacToggle("front", !isFrontOn())));
-        dock.addView(dockBtn("🔥 后除雾", false, () -> hvacToggle("rear", !isRearOn())));
-        dock.addView(dockBtn("↻ 循环", false, () -> hvacToggle("inner", !isInnerOn())));
-        dock.addView(dockBtn("📷 360", true, () -> execAction("360 全景", () -> vc.open360View())));
-        dock.addView(dockBtn("🚪 后备箱", true, () -> execAction("后备箱开关（OPEN）", () -> vc.openTrunk())));
-        dock.addView(dockBtn("🔒 锁车⚠", true, () -> execAction("锁车（实验性，观察是否落锁）", () -> vc.lockCar())));
-        dock.addView(dockBtn("🔓 解锁⚠", true, () -> execAction("解锁（实验性）", () -> vc.unlockCar())));
-        dock.addView(dockBtn("🌐 Web", true, () -> showWebInfoDialog(false)));
-
+        String[] items = {"❄ 空调", "💧 除雾", "↻ 循环", "🎥 360", "📂 后备箱", "🔒 锁车", "🔓 解锁", "📱 扫码"};
+        for (int i = 0; i < items.length; i++) {
+            final int idx = i;
+            TextView b = new TextView(this);
+            b.setText(items[i]);
+            b.setTextColor(DashboardTheme.TEXT);
+            b.setTextSize(12);
+            b.setGravity(Gravity.CENTER);
+            b.setPadding(dp(8), dp(8), dp(8), dp(8));
+            b.setOnClickListener(v -> onDock(idx));
+            dock.addView(b, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
+        }
         return dock;
     }
 
-    private TextView dockBtn(String label, boolean accent, Runnable action) {
-        TextView btn = new TextView(this);
-        btn.setText(label);
-        btn.setTextColor(accent ? DashboardTheme.TEXT : DashboardTheme.DIM);
-        btn.setTextSize(13);
-        btn.setGravity(Gravity.CENTER);
-        btn.setPadding(dp(12), dp(8), dp(12), dp(8));
-        btn.setOnClickListener(v -> action.run());
-        return btn;
-    }
-
-    // ═════════════ 卡片动作绑定 ═════════
-
-    private void bindCardActions() {
-        if (hvacCard != null) {
-            hvacCard.setListener(new HvacCardView.Listener() {
-                @Override public void onTempStep(HvacCardView card, boolean driver, int delta) {
-                    tempStep(driver, delta);
-                }
-                @Override public void onFanStep(HvacCardView card, int delta) { fanStep(delta); }
-                @Override public void onToggle(HvacCardView card, String action, boolean checked) {
-                    hvacToggle(action, checked);
-                }
-            });
-        }
-        if (lightsCard != null) lightsCard.setListener(this::onMiniToggle);
-        if (windowsCard != null) windowsCard.setListener(this::onWindowSet);
-        if (extraCard != null) extraCard.setListener(this::onMiniToggle);
-        if (lockCard != null) lockCard.setListener((card, lock) ->
-                execAction(lock ? "锁车（实验性，观察是否落锁）" : "解锁（实验性）",
-                        () -> { if (lock) vc.lockCar(); else vc.unlockCar(); }));
-    }
-
-    private void onMiniToggle(MiniGridCardView card, String id, boolean checked) {
-        switch (id) {
-            case "low_beam": execToggle("近光灯", checked, () -> vc.lowBeamOn(), () -> vc.lowBeamOff()); break;
-            case "position": execToggle("示廓灯", checked, () -> vc.positionLightOn(), () -> vc.positionLightOff()); break;
-            case "fog": execToggle("后雾灯", checked, () -> vc.fogLightOn(), () -> vc.fogLightOff()); break;
-            case "view360": execAction("360 全景", () -> vc.open360View()); break;
-            case "child_l": execAction("左儿童锁（开）", () -> vc.leftChildLockOn()); break;
-            case "child_r": execAction("右儿童锁（开）", () -> vc.rightChildLockOn()); break;
-            case "trunk_open": execAction("后备箱开", () -> vc.openTrunk()); break;
-            case "trunk_close": execAction("后备箱关", () -> vc.closeTrunk()); break;
-            case "mirror_heat": execToggle("后视镜加热⚠", checked, () -> vc.setGlobalKey("strCarMirrorHeart", "1"), () -> vc.setGlobalKey("strCarMirrorHeart", "0")); break;
-            case "window_forbit": execToggle("车窗锁⚠", checked, () -> vc.setGlobalKey("strCarWindowForbit", "1"), () -> vc.setGlobalKey("strCarWindowForbit", "0")); break;
-            case "max_cool": execToggle("最大制冷", checked, () -> vc.acMaxOn(), () -> vc.acMaxOff()); break;
-            case "ac_page": execAction("打开空调界面", () -> vc.setGlobalKey("strCar100006", "1")); break;
+    private void onDock(int i) {
+        switch (i) {
+            case 0: hvacToggle("ac", true); break;
+            case 1: hvacToggle("front", true); break;
+            case 2: hvacToggle("inner", true); break;
+            case 3: runCommand("360全景", vc::open360View); break;
+            case 4: runCommand("后备箱开", vc::openTrunk); break;
+            case 5: runCommand("车门闭锁", vc::lockCar); break;
+            case 6: runCommand("车门解锁", vc::unlockCar); break;
+            case 7: showWebInfoDialog(); break;
             default: break;
         }
     }
 
-    /** 车窗档位卡：点击档位即下发目标开度（非 toggle，无方向问题） */
-    private void onWindowSet(String voiceName, int percent) {
-        execAction("车窗 " + voiceName + " → " + percent + "%",
-                () -> vc.setWindowByName(voiceName, percent));
-    }
+    // ═══════════════════════════════════════════════
+    //  卡片动作绑定
+    // ═══════════════════════════════════════════════
 
-    private void tempStep(boolean driver, int delta) {
-        int cur = driver ? tempOf(lastSnap.driverTempHalf) : tempOf(lastSnap.passengerTempHalf);
-        int next = Math.max(16, Math.min(32, cur + delta));
-        execAction((driver ? "主驾" : "副驾") + "温度 → " + next + "℃", () -> {
-            if (driver) vc.setAcTemperature(next); else vc.setAcTemperaturePassenger(next);
+    private void bindCardActions() {
+        hvacCard.setListener(new HvacCardView.Listener() {
+            @Override public void onTempStep(HvacCardView card, boolean driver, int delta) {
+                adjustTemp(driver, delta);
+            }
+            @Override public void onFanStep(HvacCardView card, int delta) { adjustFan(delta); }
+            @Override public void onToggle(HvacCardView card, String action, boolean checked) {
+                hvacToggle(action, checked);
+            }
         });
+
+        if (windowCard != null) {
+            WindowCardView.Listener wl = (voiceName, percent) ->
+                    runCommand(voiceName + "→" + percent + "%",
+                            () -> vc.setWindowByName(voiceName, percent));
+            windowCard.setListener(wl);
+            windowCard.setCustomListener(() -> WindowSliderDialog.show(
+                    DashboardActivity.this, WindowCardView.voiceNames(),
+                    latest != null ? latest.windowPct : null, wl));
+        }
     }
 
-    private int tempOf(int halfValue) {
-        return halfValue > 0 ? halfValue / 2 : 24;
+    /** MiniGrid 回调：按按钮 id 明确动作（开/关成对，不依赖翻转状态） */
+    private void onMiniToggle(MiniGridCardView card, String id, boolean checked) {
+        switch (id) {
+            case "low_on": runCommand("近光开", vc::lowBeamOn); break;
+            case "low_off": runCommand("近光关", vc::lowBeamOff); break;
+            case "high_on": runCommand("远光开", vc::highBeamOn); break;
+            case "high_off": runCommand("远光关", vc::highBeamOff); break;
+            case "pos_on": runCommand("示廓开", vc::positionLightOn); break;
+            case "pos_off": runCommand("示廓关", vc::positionLightOff); break;
+            case "fog_on": runCommand("后雾开", vc::fogLightOn); break;
+            case "fog_off": runCommand("后雾关", vc::fogLightOff); break;
+            case "view360": runCommand("360全景", vc::open360View); break;
+            case "child_l_on": runCommand("左童锁开", vc::leftChildLockOn); break;
+            case "child_l_off": runCommand("左童锁关", vc::leftChildLockOff); break;
+            case "child_r_on": runCommand("右童锁开", vc::rightChildLockOn); break;
+            case "child_r_off": runCommand("右童锁关", vc::rightChildLockOff); break;
+            case "trunk_open": runCommand("后备箱开", vc::openTrunk); break;
+            case "trunk_close": runCommand("后备箱关", vc::closeTrunk); break;
+            case "mirror_on": runCommand("后视镜加热开", vc::mirrorHeatOn); break;
+            case "mirror_off": runCommand("后视镜加热关", vc::mirrorHeatOff); break;
+            case "winlock_on": runCommand("车窗锁开", vc::windowForbitOn); break;
+            case "winlock_off": runCommand("车窗锁关", vc::windowForbitOff); break;
+            case "ac_page": runCommand("空调界面", vc::openAcPage); break;
+            default: Logger.warn("未知车控按钮 id: " + id);
+        }
     }
 
-    private void fanStep(int delta) {
-        int cur = lastSnap.fanSpeed > 0 ? lastSnap.fanSpeed : 4;
-        int next = Math.max(1, Math.min(7, cur + delta));
-        execAction("风量 → " + next + " 档", () -> vc.setAcFanSpeed(next));
+    // ═══════════════════════════════════════════════
+    //  HVAC 调节（步进基准取最近快照，无值才用兜底）
+    // ═══════════════════════════════════════════════
+
+    private void adjustTemp(boolean driver, int delta) {
+        DashboardSnapshot s = latest;
+        int base = halfToC(s == null ? -1 : (driver ? s.driverTempHalf : s.passengerTempHalf));
+        if (base < 0) base = 24;
+        int target = clampTemp(base + delta);
+        if (driver) runCommand("主驾温度 " + target + "℃", () -> vc.setAcTemperatureDriver(target));
+        else runCommand("副驾温度 " + target + "℃", () -> vc.setAcTemperaturePassenger(target));
+    }
+
+    private void adjustFan(int delta) {
+        DashboardSnapshot s = latest;
+        int base = s == null ? -1 : s.fanSpeed;
+        if (base < 0) base = 3;
+        int target = Math.max(1, Math.min(7, base + delta));
+        runCommand("风量 " + target, () -> vc.setAcFanSpeed(target));
+    }
+
+    private static int clampTemp(int t) { return Math.max(16, Math.min(32, t)); }
+
+    private static int halfToC(int half) {
+        return half < 0 ? -1 : Math.round(half / 2f);
     }
 
     private void hvacToggle(String action, boolean checked) {
         switch (action) {
-            case "ac": execToggle("空调", checked, () -> vc.acSwitchOn(), () -> vc.acSwitchOff()); break;
-            case "inner": execToggle("内循环", checked, () -> vc.setAirInnerLoop(true), () -> vc.setAirInnerLoop(false)); break;
-            case "front": execToggle("前除霜", checked, () -> vc.frontDefrostOn(), () -> vc.frontDefrostOff()); break;
-            case "rear": execToggle("后除霜", checked, () -> vc.rearDefrostOn(), () -> vc.rearDefrostOff()); break;
-            case "max": execToggle("最大制冷", checked, () -> vc.acMaxOn(), () -> vc.acMaxOff()); break;
+            case "ac":
+                if (checked) runCommand("空调开", vc::acSwitchOn);
+                else runCommand("空调关", vc::acSwitchOff);
+                break;
+            case "max":
+                if (checked) runCommand("最大制冷开", vc::acMaxOn);
+                else runCommand("最大制冷关", vc::acMaxOff);
+                break;
+            case "inner":
+                runCommand(checked ? "内循环" : "外循环", () -> vc.setAirInnerLoop(checked));
+                break;
+            case "front":
+                if (checked) runCommand("前除霜开", vc::frontDefrostOn);
+                else runCommand("前除霜关", vc::frontDefrostOff);
+                break;
+            case "rear":
+                if (checked) runCommand("后除霜开", vc::rearDefrostOn);
+                else runCommand("后除霜关", vc::rearDefrostOff);
+                break;
             default: break;
         }
     }
 
-    private boolean isAcOn() { return lastSnap.acSwitch == 1; }
-    private boolean isFrontOn() { return lastSnap.frontDefrost == 1; }
-    private boolean isRearOn() { return lastSnap.rearDefrost == 1; }
-    private boolean isInnerOn() { return lastSnap.innerCycle == 1; }
+    // ═══════════════════════════════════════════════
+    //  命令执行（后台 + Toast），车控页与车控卡共用
+    // ═══════════════════════════════════════════════
 
-    // ═════════════ 车控执行（统一：后台执行 + toast + 触发刷新） ═════════
-
-    private void execAction(String name, Runnable action) {
-        if (!Sh.isAdbConnected()) {
-            Toast.makeText(this, "ADB 未连接，命令可能无效（点状态条连接）", Toast.LENGTH_SHORT).show();
-        }
-        Logger.info("车控: " + name);
-        controlPool.execute(() -> {
-            boolean ok;
-            try { action.run(); ok = true; } catch (Exception e) { ok = false; Logger.error("车控失败: " + e.getMessage()); }
-            final boolean fok = ok;
-            post(() -> Toast.makeText(this, name + (fok ? " 已发送" : " 失败"), Toast.LENGTH_SHORT).show());
-            repository.requestRefresh();
+    private void runCommand(final String label, final Callable<Boolean> task) {
+        Sh.submitAsync(() -> {
+            boolean ok = false;
+            try {
+                ok = Boolean.TRUE.equals(task.call());
+            } catch (Exception e) {
+                Logger.error("车控", label + " 执行异常", e);
+            }
+            final boolean fOk = ok;
+            runOnUiThread(() -> Toast.makeText(DashboardActivity.this,
+                    label + (fOk ? " ✅" : " ❌"), Toast.LENGTH_SHORT).show());
+            // 车控后稍等，主动触发一轮采集
+            if (repository != null) ui.postDelayed(() -> repository.requestRefresh(), 1500);
         });
     }
 
-    private void execToggle(String name, boolean checked, Runnable on, Runnable off) {
-        execAction(name + (checked ? " 开" : " 关"), checked ? on : off);
+    // ═══════════════════════════════════════════════
+    //  一键诊断 / 日志导出
+    // ═══════════════════════════════════════════════
+
+    private void runDiagnostic() {
+        Toast.makeText(this, "正在采集一键诊断…", Toast.LENGTH_SHORT).show();
+        DiagnosticRunner.run(this, webServer, this::showReportDialog);
     }
 
-    private void runBackground(String name, Runnable action) {
-        controlPool.execute(action);
-    }
-
-    // ═════════════ 数据刷新 ═════════
-
-    private void onSnapshot(DashboardSnapshot snap) {
-        lastSnap = snap;
-        // 信号清单页不依赖卡片挂载，首帧即可填充
-        if (signalPage != null) signalPage.setRows(snap.rows);
-        // 视图尚未挂载时跳过本轮（卡片 buildContent 未完成），下一轮 5s 后自动补上
-        if (batteryCard == null || !batteryCard.isAttachedToWindow()) return;
-
-        // ADB 状态
-        if (snap.adbConnected) {
-            adbStatusView.setText("ADB ✓");
-            adbStatusView.setTextColor(DashboardTheme.GREEN);
-        } else {
-            adbStatusView.setText("ADB ✗");
-            adbStatusView.setTextColor(DashboardTheme.RED);
-        }
-
-        // 档位/车速/电量
-        StringBuilder chips = new StringBuilder();
-        chips.append("档 ").append(snap.gear.isEmpty() ? "-" : snap.gear);
-        chips.append("  速 ").append(snap.speedKmh >= 0 ? snap.speedKmh : "-").append("km/h");
-        chips.append("  电 ").append(snap.batterySoc >= 0 ? snap.batterySoc + "%" : "-");
-        statusChipsView.setText(chips.toString());
-
-        // Web
-        boolean webOn = webServer != null && webServer.isRunning();
-        webView.setText(webOn ? "Web " + webServer.getPort() : "Web 关");
-        webView.setTextColor(webOn ? DashboardTheme.GREEN : DashboardTheme.DIM);
-
-        // 未连接：数据卡统一"加载中"（从未获取），车窗清除档位高亮，不进入 setData
-        if (!snap.adbConnected) {
-            setCardsLoading();
-            return;
-        }
-
-        // 电量卡：电量% / 电压V / 续航km
-        batteryCard.setData(snap.batterySoc >= 0 ? String.valueOf(snap.batterySoc) : null, "%",
-                subLine(snap.voltage > 0 ? "电压 " + one(snap.voltage) + "V" : null,
-                        snap.rangeStd > 0 ? "续航 " + snap.rangeStd + "km" : null));
-
-        outsideTempCard.setData((snap.outsideTemp != -1 && inRange(snap.outsideTemp, -50, 60)) ? String.valueOf(snap.outsideTemp) : null, "℃", null);
-        voltageCard.setData(snap.voltage > 100 && snap.voltage < 600 ? one(snap.voltage) : null, "V", null);
-        musicVolCard.setData(inRange(snap.musicVol, 0, 100) ? String.valueOf(snap.musicVol) : null, null, null);
-        speechVolCard.setData(inRange(snap.speechVol, 0, 100) ? String.valueOf(snap.speechVol) : null, null, null);
-        naviVolCard.setData(inRange(snap.naviVol, 0, 100) ? String.valueOf(snap.naviVol) : null, null, null);
-        pm25Card.setData(inRange(snap.pm25, 0, 1000) ? String.valueOf(snap.pm25) : null, "µg/m³", null);
-
-        if (hvacCard != null) {
-            hvacCard.setTemps(snap.driverTempHalf > 0 ? snap.driverTempHalf / 2 : -1,
-                              snap.passengerTempHalf > 0 ? snap.passengerTempHalf / 2 : -1);
-            hvacCard.setFan(snap.fanSpeed);
-            hvacCard.setToggles(snap.acSwitch, -1, snap.innerCycle, snap.frontDefrost, snap.rearDefrost);
-        }
-        if (tiresCard != null) tiresCard.setTires(snap.tirePressKpa, snap.tireTempC);
-        if (doorsCard != null) doorsCard.setDoors(snap.doorStates);
-        if (windowsCard != null) windowsCard.setPositions(snap.windowPct);
-    }
-
-    /** 全部数据卡置"加载中"（ADB 未连接时） */
-    private void setCardsLoading() {
-        batteryCard.setLoading();
-        outsideTempCard.setLoading();
-        voltageCard.setLoading();
-        musicVolCard.setLoading();
-        speechVolCard.setLoading();
-        naviVolCard.setLoading();
-        pm25Card.setLoading();
-        if (windowsCard != null) windowsCard.setPositions(new int[]{-1, -1, -1, -1});
-    }
-
-    private String subLine(String a, String b) {
-        if (a == null && b == null) return "";
-        if (a == null) return b;
-        if (b == null) return a;
-        return a + "  " + b;
-    }
-
-    private static boolean inRange(int v, int lo, int hi) { return v >= lo && v <= hi; }
-
-    private String one(float v) {
-        return String.format(Locale.US, "%.1f", v);
-    }
-
-    // ═════════════ Web ═════════
-
-    private void startWebAuto() {
-        try {
-            android.content.SharedPreferences prefs = getSharedPreferences("c11cartool", MODE_PRIVATE);
-            int port = prefs.getInt("web_port", 8080);
-            boolean ok = webServer.start(port);
-            if (ok) prefs.edit().putInt("web_port", webServer.getPort()).apply();
-        } catch (Exception e) {
-            Logger.error("Web 自启异常: " + e.getMessage());
-        }
-    }
-
-    private void showWebInfoDialog(boolean adbOnly) {
-        int port = webServer.isRunning() ? webServer.getPort() : 8080;
-        String url = "http://" + WebServer.getDeviceIp() + ":" + port;
-
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        int pad = dp(16);
-        box.setPadding(pad, pad, pad, 0);
-
-        // 二维码：手机连同一 WiFi 扫码即开
-        ImageView qrView = new ImageView(this);
-        qrView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        Bitmap qrBmp = QrBitmap.toBitmap(url, 8);
-        if (qrBmp != null) {
-            qrView.setImageBitmap(qrBmp);
-            LinearLayout.LayoutParams qlp = new LinearLayout.LayoutParams(dp(220), dp(220));
-            qlp.gravity = Gravity.CENTER_HORIZONTAL;
-            box.addView(qrView, qlp);
-        }
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("\n手机连同一 WiFi，扫码或浏览器输入：\n  ").append(url).append("\n\n");
-        sb.append("本机全部 IP（手机须与 wlan0 同网段）：\n");
-        for (String s : WebServer.getAllIps()) sb.append("  ").append(s).append("\n");
-        if (adbOnly) sb.append("\nADB 已连接，可点「工程模式」做完整调试。");
+    private void showReportDialog(String report) {
+        ScrollView sv = new ScrollView(this);
         TextView tv = new TextView(this);
-        tv.setText(sb.toString());
-        tv.setTextSize(13);
-        box.addView(tv);
+        tv.setText(report);
+        tv.setTextSize(11);
+        tv.setTypeface(Typeface.MONOSPACE);
+        tv.setTextColor(0xFFE5E7EB);
+        sv.addView(tv);
+        int pad = dp(12);
+        sv.setPadding(pad, pad, pad, pad);
 
         new AlertDialog.Builder(this)
-                .setTitle("🌐 Web 遥控")
-                .setView(box)
-                .setPositiveButton("好的", null)
+                .setTitle("🩺 一键诊断结果")
+                .setView(sv)
+                .setPositiveButton("导出报告", (d, w) ->
+                        LogExport.saveText(this, "diagnostic", report, (path, ok) ->
+                                Toast.makeText(this, ok ? "诊断已导出:\n" + path : "导出失败",
+                                        Toast.LENGTH_LONG).show()))
+                .setNegativeButton("关闭", null)
                 .show();
     }
 
-    // ═════════════ 时钟 & 生命周期 ═════════
+    private void exportLogs() {
+        LogExport.exportLogs(this, (path, ok) ->
+                Toast.makeText(this, ok ? "日志已导出:\n" + path : "导出失败",
+                        Toast.LENGTH_LONG).show());
+    }
 
-    private void startClock() {
-        final SimpleDateFormat fmt = new SimpleDateFormat("HH:mm", Locale.CHINA);
-        h.post(new Runnable() {
-            @Override public void run() {
-                timeView.setText(fmt.format(new Date()));
-                h.postDelayed(this, 1000);
-            }
+    // ═══════════════════════════════════════════════
+    //  Web 服务
+    // ═══════════════════════════════════════════════
+
+    private void startWebAuto() {
+        int preferred = getSharedPreferences("c11cartool", MODE_PRIVATE).getInt("web_port", 8080);
+        Sh.submitAsync(() -> {
+            boolean ok = webServer.start(preferred);
+            getSharedPreferences("c11cartool", MODE_PRIVATE)
+                    .edit().putInt("web_port", webServer.getPort()).apply();
+            Logger.ok("Web 服务" + (ok ? "已启动，端口 " + webServer.getPort() : "启动失败"));
+            runOnUiThread(this::updateStatusBar);
         });
     }
 
-    private void onAdbStateChanged(boolean connected, int uid) {
-        post(() -> {
-            if (connected) { adbStatusView.setText("ADB ✓"); adbStatusView.setTextColor(DashboardTheme.GREEN); }
-            else { adbStatusView.setText("ADB ✗"); adbStatusView.setTextColor(DashboardTheme.RED); }
-            repository.requestRefresh();
-        });
+    private void showWebInfoDialog() {
+        WebPages.WebInfo info = new WebPages.WebInfo(
+                webServer.isRunning(), webServer.getPort(),
+                webServer.getAuthToken(), WebServer.getDeviceIp());
+        new AlertDialog.Builder(this)
+                .setTitle("📱 手机扫码测控")
+                .setView(WebPages.buildInfoView(this, info))
+                .setPositiveButton("知道了", null)
+                .show();
     }
 
-    private void post(Runnable r) { if (h != null) h.post(r); }
+    // ═══════════════════════════════════════════════
+    //  数据回调（Repository → UI）
+    // ═══════════════════════════════════════════════
+
+    @Override public void onSnapshot(DashboardSnapshot snap) {
+        latest = snap;
+        applySnapshot(snap);
+    }
+
+    private void applySnapshot(DashboardSnapshot snap) {
+        if (snap == null) {
+            updateStatusBar();
+            return;
+        }
+
+        String soc = snap.batterySoc >= 0 ? String.valueOf(snap.batterySoc) : null;
+        int range = snap.rangeDyn >= 0 ? snap.rangeDyn : snap.rangeStd;
+        String volt = snap.voltage >= 0 ? fmt1(snap.voltage) : "--";
+        powerCard.setData(soc, "%",
+                "续航 " + (range >= 0 ? range : "--") + " km · " + volt + " V");
+
+        hvacCard.setTemps(halfToC(snap.driverTempHalf), halfToC(snap.passengerTempHalf));
+        hvacCard.setFan(snap.fanSpeed);
+        hvacCard.setToggles(snap.acSwitch, -1, snap.innerCycle, snap.frontDefrost, snap.rearDefrost);
+
+        outTempCard.setData(snap.outsideTemp >= 0 ? String.valueOf(snap.outsideTemp) : null,
+                "℃", "车外温度");
+        setVol(mediaVolCard, snap.musicVol, "媒体音量");
+        setVol(naviVolCard, snap.naviVol, "导航音量");
+        setVol(speechVolCard, snap.speechVol, "语音音量");
+        setVol(callVolCard, snap.callVol, "通话音量");
+
+        tiresCard.setTires(snap.tirePressKpa, snap.tireTempC);
+        doorsCard.setDoors(snap.doorStates);
+
+        spanCard.setData(computePower(snap), "kW",
+                "电流 " + (snap.current >= 0 ? fmt1(snap.current) : "--") + " A");
+
+        if (windowCard != null) windowCard.setPositions(snap.windowPct);
+        if (signalPage != null) signalPage.setRows(snap.rows);
+
+        updateStatusBar();
+    }
+
+    private static void setVol(DataCardView card, int v, String label) {
+        card.setData(v >= 0 ? String.valueOf(v) : null, "", label);
+    }
+
+    /** 功率 kW = 电压 V × 电流 A / 1000；任一缺失返 null（UI 显失败，不臆测） */
+    private static String computePower(DashboardSnapshot s) {
+        if (s.voltage >= 0 && s.current >= 0) {
+            return fmt1(s.voltage * s.current / 1000f);
+        }
+        return null;
+    }
+
+    private static String fmt1(float v) {
+        return String.format(java.util.Locale.US, "%.1f", v);
+    }
+
+    private void updateStatusBar() {
+        DashboardSnapshot s = latest;
+        boolean adb = Sh.isAdbConnected();
+        adbChip.setText(adb ? "🔌 ADB 已连" : "🔌 未连接");
+        adbChip.setTextColor(adb ? DashboardTheme.GREEN : DashboardTheme.ORANGE);
+        gearChip.setText("档位 " + (s != null && !s.gear.isEmpty() ? s.gear : "--"));
+        speedChip.setText("车速 " + (s != null && s.speedKmh >= 0 ? s.speedKmh : "--"));
+        powerChip.setText("电量 " + (s != null && s.batterySoc >= 0 ? s.batterySoc + "%" : "--"));
+        timeChip.setText("时间 " + new java.text.SimpleDateFormat(
+                "HH:mm", java.util.Locale.getDefault()).format(new java.util.Date()));
+        webChip.setText(webServer != null && webServer.isRunning()
+                ? "🌐 Web:" + webServer.getPort() : "🌐 Web:关");
+    }
+
+    // ═══════════════════════════════════════════════
+    //  沉浸模式 / 工具
+    // ═══════════════════════════════════════════════
+
+    private void enterImmersive() {
+        getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) enterImmersive();
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        enterImmersive();
+    }
+
+    private boolean isCompactScreen() {
+        return getResources().getDisplayMetrics().heightPixels < 900;
+    }
 
     private int dp(int v) {
         return Math.round(v * getResources().getDisplayMetrics().density);
     }
 
     @Override
-    protected void onResume() {
-        super.onResume();
-        // 视图已挂载，此时才启动采集（避免首帧与 buildContent 竞争）
-        if (repository != null && !repository.isRunning()) {
-            repository.start();
-        }
-        if (repository != null) repository.requestRefresh();
-    }
-
-    @Override
     protected void onDestroy() {
         super.onDestroy();
+        ui.removeCallbacksAndMessages(null);
+        if (stateListener != null) Sh.removeStateListener(stateListener);
         if (repository != null) repository.stop();
-        Sh.removeStateListener(adbListener);
-        try { if (webServer != null) webServer.stop(); } catch (Exception ignored) {}
-        controlPool.shutdownNow();
+        if (webServer != null) webServer.stop();
     }
 }

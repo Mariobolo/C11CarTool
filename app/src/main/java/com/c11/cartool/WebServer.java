@@ -375,20 +375,20 @@ public class WebServer {
         sb.append(",\"permission\":\"").append(Sh.getPermissionLabel()).append("\"");
         sb.append(",\"data\":{");
 
-        // 读取各项车辆数据
+        // 读取真实零跑 settings global 键（strCar*）；不臆造 battery_soc 等不存在的键。
+        // 电量/续航/车速/档位/胎压走 logcat·TPMS，settings 读不到，故不在此列（Web 顶部卡片保持 --，以 App 仪表盘为准）。
         String[][] keys = {
-            {"battery_soc", "battery"},
-            {"vehicle_range", "range"},
-            {"vehicle_odo", "odometer"},
-            {"vehicle_speed", "speed"},
-            {"gear", "gear"},
-            {"charging_state", "charging"},
-            {"tire_pressure_fl", "tireFL"},
-            {"tire_pressure_fr", "tireFR"},
-            {"tire_pressure_rl", "tireRL"},
-            {"tire_pressure_rr", "tireRR"},
-            {"ac_temperature", "acTemp"},
-            {"ac_fan_speed", "acFan"}
+            {"strCarAirSwitch", "acSwitch"},
+            {"strCarWind", "fanSpeed"},
+            {"strCarAirInner", "innerLoop"},
+            {"strCar1409", "driverTempHalf"},
+            {"strCar1410", "passTempHalf"},
+            {"strCarFrontDefrost", "frontDefrost"},
+            {"strCarRearDefrost", "rearDefrost"},
+            {"strCarChildLock", "childLock"},
+            {"strCarPm25", "pm25"},
+            {"strCarMirrorHeart", "mirrorHeat"},
+            {"strCarWindowForbit", "windowForbit"}
         };
 
         boolean first = true;
@@ -448,6 +448,12 @@ public class WebServer {
                     // 灯光
                     case "lowBeamOn": ok = vehicleController.lowBeamOn(); break;
                     case "lowBeamOff": ok = vehicleController.lowBeamOff(); break;
+                    case "highBeamOn": ok = vehicleController.highBeamOn(); break;
+                    case "highBeamOff": ok = vehicleController.highBeamOff(); break;
+                    case "autoLights": ok = vehicleController.autoLights(); break;
+                    case "closeAllLights": ok = vehicleController.closeAllLights(); break;
+                    case "frontFogOn": ok = vehicleController.frontFogOn(); break;
+                    case "frontFogOff": ok = vehicleController.frontFogOff(); break;
                     case "fogLightOn": ok = vehicleController.fogLightOn(); break;
                     case "fogLightOff": ok = vehicleController.fogLightOff(); break;
                     case "positionLightOn": ok = vehicleController.positionLightOn(); break;
@@ -481,6 +487,29 @@ public class WebServer {
                     case "windowRRDown": ok = vehicleController.setWindow("rear_right", 0); break;
                     // 360
                     case "open360": ok = vehicleController.open360View(); break;
+                    // 车窗任意开度：{action:"setWindow", window:"front_left", percent:50}
+                    case "setWindow": {
+                        String win = extractJsonValue(body, "window");
+                        String pctStr = extractJsonValue(body, "percent");
+                        if (win == null || !win.matches("front_left|front_right|rear_left|rear_right"))
+                            return "{\"success\":false,\"error\":\"invalid window\"}";
+                        int pct = -1;
+                        try { pct = Integer.parseInt(pctStr.trim()); } catch (Exception ignored) {}
+                        if (pct < 0 || pct > 100)
+                            return "{\"success\":false,\"error\":\"invalid percent\"}";
+                        ok = vehicleController.setWindow(win, pct);
+                        break;
+                    }
+                    // 空调运行模式 raw：{action:"airStatus", mode:0-3}
+                    case "airStatus": {
+                        String modeStr = extractJsonValue(body, "mode");
+                        int mode = -1;
+                        try { mode = Integer.parseInt(modeStr.trim()); } catch (Exception ignored) {}
+                        if (mode < 0 || mode > 3)
+                            return "{\"success\":false,\"error\":\"invalid mode\"}";
+                        ok = vehicleController.setAirStatusRaw(mode);
+                        break;
+                    }
                     default:
                         return "{\"success\":false,\"error\":\"unknown action: " + escapeJson(action) + "\"}";
                 }

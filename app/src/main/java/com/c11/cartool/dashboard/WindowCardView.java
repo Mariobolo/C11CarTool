@@ -21,6 +21,12 @@ public class WindowCardView extends SpanCardView {
         void onWindowSet(String voiceName, int percent);
     }
 
+    /** 自定义开度入口回调（弹出四窗 SeekBar Dialog） */
+    public interface CustomListener { void onCustomWindow(); }
+
+    /** 讯飞 handMessage 车窗名（顺序同 Snapshot.windowPct），供滑杆 Dialog 复用 */
+    public static String[] voiceNames() { return TITLES.clone(); }
+
     /** 车窗展示顺序与 Snapshot.windowPct 一致：左前 右前 左后 右后 */
     private static final String[] TITLES = {"主驾车窗", "副驾车窗", "左后车窗", "右后车窗"};
     private static final int[] LEVELS = {10, 50, 100, 0};
@@ -30,6 +36,7 @@ public class WindowCardView extends SpanCardView {
 
     private final boolean compact;
     private Listener listener;
+    private CustomListener customListener;
     /** 每车窗 4 个档位按钮：[windowIndex][levelIndex] */
     private final TextView[][] levelBtns;
 
@@ -41,6 +48,10 @@ public class WindowCardView extends SpanCardView {
 
     public void setListener(Listener l) {
         this.listener = l;
+    }
+
+    public void setCustomListener(CustomListener l) {
+        this.customListener = l;
     }
 
     @Override
@@ -60,7 +71,26 @@ public class WindowCardView extends SpanCardView {
 
             TextView name = text(compact ? 10 : 11, DashboardTheme.DIM, 0);
             name.setText(TITLES[w]);
-            col.addView(name, new LinearLayout.LayoutParams(
+            LinearLayout nameRow = new LinearLayout(ctx);
+            nameRow.setOrientation(LinearLayout.HORIZONTAL);
+            nameRow.setGravity(Gravity.CENTER_VERTICAL);
+            nameRow.addView(name, new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            if (w == 0) {
+                // 全局"自定义开度"入口（弹出四窗 SeekBar），只放一次，避免重复
+                TextView custom = new TextView(ctx);
+                custom.setText("🎚");
+                custom.setTextSize(TypedValue.COMPLEX_UNIT_SP, compact ? 11 : 13);
+                custom.setGravity(Gravity.CENTER);
+                custom.setPadding(dp(6), 0, dp(2), 0);
+                custom.setOnClickListener(v -> {
+                    if (customListener != null) customListener.onCustomWindow();
+                });
+                nameRow.addView(custom, new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT));
+            }
+            col.addView(nameRow, new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
             LinearLayout grid = new LinearLayout(ctx);
