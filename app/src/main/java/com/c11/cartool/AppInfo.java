@@ -10,10 +10,10 @@ public final class AppInfo {
     private AppInfo() {}
 
     /** 版本号（与 build.gradle versionName 保持一致） */
-    public static final String VERSION = "0.3.8";
+    public static final String VERSION = "0.3.9";
 
     /** 内部版本号（与 build.gradle versionCode 保持一致） */
-    public static final int VERSION_CODE = 14;
+    public static final int VERSION_CODE = 15;
 
     /** 应用显示名 */
     public static final String APP_NAME = "C11 车控";
@@ -25,7 +25,9 @@ public final class AppInfo {
      * 当前版本功能清单（首页 / 说明展示）。每行一条。
      */
     public static final String FEATURE_LIST =
-            "- 三页结构：仪表盘 / 📊 全车信号清单 / 🎛 全部车控，状态条点击切换\n"
+            "- 毛玻璃主题：彩色光晕壁纸 + 半透明玻璃卡（高光 + 描边 + 圆角）\n"
+            + "- 主页左右滑动四页：行车概览 / 空调座舱 / 车控 / 工具，模块完整不挤，底部页面指示点\n"
+            + "- 另有 📊 全车信号清单 / 🎛 全部车控两页，状态条点击切换\n"
             + "- 取消工程模式：一键诊断、日志导出、手机扫码测控全部前端直达\n"
             + "- 全部车控页：车控命令全量平铺、分组展示；同一功能多通道并列标注，上机分别试即可标定\n"
             + "- 信号清单：支持按名称 / 渠道 / 分组搜索，分组可折叠；多渠道同名各占一行\n"

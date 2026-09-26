@@ -2,7 +2,6 @@ package com.c11.cartool.dashboard;
 
 import android.content.Context;
 import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.widget.FrameLayout;
@@ -22,7 +21,7 @@ public abstract class SpanCardView extends FrameLayout {
     private String rawTitle;
     private String channel;
 
-    private GradientDrawable bg;
+    private final int cornerDp;
 
     public SpanCardView(Context context, String title, int cornerDp) {
         super(context);
@@ -30,11 +29,9 @@ public abstract class SpanCardView extends FrameLayout {
         setLayoutParams(new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
         setPadding(dp(10), dp(8), dp(10), dp(6));
 
-        // 圆角卡片底
-        bg = new GradientDrawable();
-        bg.setCornerRadius(dp(cornerDp));
-        bg.setColor(DashboardTheme.CARD);
-        setBackground(bg);
+        // 玻璃卡片底（半透明填充 + 顶部高光 + 细描边）
+        this.cornerDp = cornerDp;
+        setBackground(Glass.bg(context, cornerDp, Glass.NORMAL));
 
         // 标题行
         if (title != null && !title.isEmpty()) {
@@ -88,9 +85,10 @@ public abstract class SpanCardView extends FrameLayout {
     // ── 状态样式 ──
 
     public void setState(State s) {
-        bg.setColor(s == State.ACTIVE ? DashboardTheme.CARD_ACT
-                : s == State.ERROR ? DashboardTheme.CARD_ERR
-                : DashboardTheme.CARD);
+        int tone = s == State.ACTIVE ? Glass.BLUE
+                : s == State.ERROR ? Glass.RED
+                : Glass.NORMAL;
+        setBackground(Glass.bg(ctx, cornerDp, tone));
     }
 
     public void setBadge(String text) {
