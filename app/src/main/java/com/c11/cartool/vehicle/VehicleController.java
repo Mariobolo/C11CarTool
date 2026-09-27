@@ -218,6 +218,64 @@ public class VehicleController {
         return sendVoice("carControl", obj().put("operation", "OPEN").put("name", "360"));
     }
 
+    // ═══ 语音释放：释放语音助手对麦克风的占用（stopvr），便于其它应用录音 ═══
+    private static final String VOICE_RELEASE_PKG = "com.iflytek.cutefly.speechclient.hmi";
+    private static final String VOICE_RELEASE_CLS = "com.iflytek.auto.speechclient.sdk.SpeechClientService";
+
+    public boolean releaseVoice() {
+        try {
+            Log.i(TAG, "语音释放 stopvr");
+            if (Sh.isAdbConnected()) {
+                String cmd = "am startservice -n " + VOICE_RELEASE_PKG + "/" + VOICE_RELEASE_CLS
+                        + " --ez stopvr true";
+                Sh.Result r = Sh.run(cmd);
+                lastResult = r;
+                Logger.cmd(cmd, r);
+                return r.exit == 0;
+            } else {
+                Intent i = new Intent();
+                i.setComponent(new ComponentName(VOICE_RELEASE_PKG, VOICE_RELEASE_CLS));
+                i.putExtra("stopvr", true);
+                if (android.os.Build.VERSION.SDK_INT >= 26) context.startForegroundService(i);
+                else context.startService(i);
+                return true;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "语音释放失败: " + e.getMessage(), e);
+            return false;
+        }
+    }
+
+    // ═══ 场景模式（tocarcontrol 广播：小憩 / 露营 / 省电 / 守护 / 哨兵 / 行人警示，待真机验证）═══
+    public boolean scene(String type) {
+        return sendLegacy(ACTION_TO_CAR_CONTROL, type, 1);
+    }
+
+    /** 实验通道：shell setprop（如后视镜折叠 leap.vehicle.mirror_fold；普通 shell 对 leap.* 多为空）。 */
+    public boolean shellSetProp(String key, String val) {
+        try {
+            key = sanitizeShellArg(key);
+            val = sanitizeShellArg(val);
+            String cmd = "setprop " + key + " " + val;
+            Sh.Result r = Sh.run(cmd);
+            lastResult = r;
+            Logger.cmd(cmd, r);
+            return r.exit == 0;
+        } catch (Exception e) {
+            Log.e(TAG, "setprop 失败: " + e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /** 媒体按键（input keyevent：85 播放暂停 / 87 下一首 / 88 上一首），播放器降级通道。 */
+    public boolean mediaKey(int code) {
+        String cmd = "input keyevent " + code;
+        Sh.Result r = Sh.run(cmd);
+        lastResult = r;
+        Logger.cmd(cmd, r);
+        return r.exit == 0;
+    }
+
     // ═══════════════════════════════════════════════════════════
     //  通道实现
     // ═══════════════════════════════════════════════════════════

@@ -55,6 +55,10 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
     private FlowGridLayout flow;
     private final Map<String, TileView> tiles = new LinkedHashMap<>();
 
+    // v0.3.10 仪表 / 波形图表
+    private GaugeView speedGauge, socGauge, powerGauge;
+    private LineChartView voltageChart, currentChart, powerChart, speedChart;
+
     private TextView adbChip, gearChip, speedChip, powerChip, timeChip, webChip;
 
     private static final String[] WIN_TITLES = {"主驾车窗", "副驾车窗", "左后车窗", "右后车窗"};
@@ -147,6 +151,16 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
     // ── 分组与小模块装配 ──
 
     private void buildTiles() {
+        // ── 仪表 · 波形图表 ──
+        group("📊 仪表 · 波形");
+        speedGauge = gaugeTile("车速", 0, 200, "km/h", DashboardTheme.BLUE);
+        socGauge = gaugeTile("电量", 0, 100, "%", DashboardTheme.GREEN);
+        powerGauge = gaugeTile("功率", -60, 60, "kW", DashboardTheme.ORANGE);
+        voltageChart = chartTile("电压波形", "V", DashboardTheme.CYAN);
+        currentChart = chartTile("电流波形", "A", DashboardTheme.PURPLE);
+        powerChart = chartTile("功率波形", "kW", DashboardTheme.ORANGE);
+        speedChart = chartTile("车速波形", "km/h", DashboardTheme.BLUE);
+
         // 行车信息
         group("🚗 行车信息");
         tile("soc", TileView.Type.VALUE, "电量", 1, 1);
@@ -159,12 +173,16 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         tile("outtemp", TileView.Type.VALUE, "车外温度", 1, 1);
         tile("pm25", TileView.Type.VALUE, "PM2.5", 1, 1);
 
-        // 音量（步进 2×1）
+        // 音量（滑块 2×1）
         group("🔊 音量");
-        tile("vol_music", TileView.Type.STEP, "媒体音量", 2, 1).setListener(volumeStep("C11_MUSIC"));
-        tile("vol_navi", TileView.Type.STEP, "导航音量", 2, 1).setListener(volumeStep("C11_NAVI"));
-        tile("vol_speech", TileView.Type.STEP, "语音音量", 2, 1).setListener(volumeStep("C11_SPEECH"));
-        tile("vol_call", TileView.Type.STEP, "通话音量", 2, 1).setListener(volumeStep("C11_CALL"));
+        slider("vol_music", "媒体音量", 0, 100, 50, "",
+                v -> vc.setGlobalKey("C11_MUSIC", String.valueOf(v)));
+        slider("vol_navi", "导航音量", 0, 100, 50, "",
+                v -> vc.setGlobalKey("C11_NAVI", String.valueOf(v)));
+        slider("vol_speech", "语音音量", 0, 100, 50, "",
+                v -> vc.setGlobalKey("C11_SPEECH", String.valueOf(v)));
+        slider("vol_call", "通话音量", 0, 100, 50, "",
+                v -> vc.setGlobalKey("C11_CALL", String.valueOf(v)));
 
         // 胎压胎温
         group("🛞 胎压胎温");
@@ -184,11 +202,9 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
 
         // 空调座舱
         group("❄ 空调座舱");
-        tile("temp_driver", TileView.Type.STEP, "主驾温度", 2, 1).setListener(step(0));
-        tile("temp_pass", TileView.Type.STEP, "副驾温度", 2, 1).setListener(step(1));
-        tile("fan", TileView.Type.STEP, "风量", 2, 1).setListener(new TileView.Listener() {
-            @Override public void onStep(int d) { adjustFan(d); }
-        });
+        slider("temp_driver", "主驾温度", 16, 32, 22, "℃", vc::setAcTemperatureDriver);
+        slider("temp_pass", "副驾温度", 16, 32, 22, "℃", vc::setAcTemperaturePassenger);
+        slider("fan", "风量", 1, 7, 3, "档", vc::setAcFanSpeed);
         toggle("ac", "空调", "ac");
         toggle("acmax", "最大制冷", "max");
         toggle("innerloop", "内外循环", "inner");
@@ -201,6 +217,13 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         action("airraw2", "模式2", () -> vc.setAirStatusRaw(2));
         action("airraw3", "模式3", () -> vc.setAirStatusRaw(3));
         actionRun("acpage", "空调界面", vc::openAcPage);
+
+        // 阅读灯
+        group("📖 阅读灯");
+        domeActions("read_fl", "前左阅读灯", "CARLIGHT_FLDOMELAMPCTRL");
+        domeActions("read_fr", "前右阅读灯", "CARLIGHT_FRDOMELAMPCTRL");
+        domeActions("read_rl", "左后阅读灯", "CARLIGHT_RLDOMELAMPCTRL");
+        domeActions("read_rr", "右后阅读灯", "CARLIGHT_RRDOMELAMPCTRL");
 
         // 车窗（点击开滑杆）
         group("🪟 车窗");
@@ -231,6 +254,27 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         actionRun("auto", "自动灯光", vc::autoLights);
         actionRun("closeall", "关闭全部", vc::closeAllLights);
 
+        // 连接 · 环境 · 场景
+        group("📶 连接 · 环境 · 场景");
+        tile("bt", TileView.Type.VALUE, "蓝牙", 1, 1);
+        tile("wifi", TileView.Type.VALUE, "WiFi", 1, 1);
+        tile("ble", TileView.Type.VALUE, "蓝牙BLE", 1, 1);
+        tile("ptc", TileView.Type.VALUE, "PTC出风温度", 1, 1);
+        tile("ambient", TileView.Type.VALUE, "氛围灯", 1, 1);
+        tile("airstatus", TileView.Type.VALUE, "空调模式", 1, 1);
+        toggle("sentinel", "哨兵模式", "sentinel");
+        toggle("speechspeak", "语音播报", "speechspeak");
+        actionRun("scene_rest", "⚠小憩模式", () -> vc.scene("REST_MODE"));
+        actionRun("scene_camp", "⚠露营模式", () -> vc.scene("CAMPING_MODE"));
+        actionRun("scene_save", "⚠省电模式", () -> vc.scene("POWER_SAVE_MODE"));
+        actionRun("scene_guard", "⚠守护模式", () -> vc.scene("GUARD_MODE"));
+        actionRun("scene_senti", "⚠哨兵(广播)", () -> vc.scene("SENTINEL_MODE"));
+        actionRun("scene_ped", "⚠行人警示音", () -> vc.scene("PEDESTRIANS_ALERT"));
+        actionRun("mirror_fold", "⚠后视镜折叠",
+                () -> vc.shellSetProp("leap.vehicle.mirror_fold", "1"));
+        actionRun("force_charge", "⚠强制充电",
+                () -> vc.shellSetProp("leap.energy.force_charge", "1"));
+
         // 车身 / 工具
         group("🧰 车身 / 工具");
         action("trunk_open", "后备箱开", () -> vc.openTrunk());
@@ -252,6 +296,39 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         tv.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         tv.setPadding(dp(4), dp(8), dp(4), dp(2));
         flow.addGroupHeader(tv);
+    }
+
+    // ── v0.3.10 图表 / 滑块 / 阅读灯 helper ──
+
+    private GaugeView gaugeTile(String title, float min, float max, String unit, int color) {
+        GaugeView g = new GaugeView(this, title);
+        g.setRange(min, max);
+        g.setUnit(unit);
+        g.setColor(color);
+        flow.addCell(g, 2, 2);
+        return g;
+    }
+
+    private LineChartView chartTile(String title, String unit, int color) {
+        LineChartView c = new LineChartView(this, title);
+        c.setUnit(unit);
+        c.setColor(color);
+        flow.addCell(c, 3, 2);
+        return c;
+    }
+
+    private void slider(String id, String label, int min, int max, int init, String unit,
+                        java.util.function.IntConsumer handler) {
+        TileView t = tile(id, TileView.Type.SLIDER, label, 2, 1);
+        t.setSlider(min, max, init, unit);
+        t.setListener(new TileView.Listener() {
+            @Override public void onSlider(int v) { handler.accept(v); }
+        });
+    }
+
+    private void domeActions(String id, String label, String opcode) {
+        action(id + "_on", label + " 开", () -> vc.domeLight(opcode, true));
+        action(id + "_off", label + " 关", () -> vc.domeLight(opcode, false));
     }
 
     private TileView tile(String id, TileView.Type type, String label, int sx, int sy) {
@@ -287,18 +364,6 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         };
     }
 
-    private TileView.Listener volumeStep(String key) {
-        return new TileView.Listener() {
-            @Override public void onStep(int d) { adjustVolume(key, d); }
-        };
-    }
-
-    private TileView.Listener step(final int which) {
-        return new TileView.Listener() {
-            @Override public void onStep(int d) { adjustTemp(which == 0, d); }
-        };
-    }
-
     // ═══════════════════════════════════════════════
     //  状态条
     // ═══════════════════════════════════════════════
@@ -315,6 +380,7 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         speedChip = chip("车速 --", false, v -> showPage(0));
         powerChip = chip("电量 --", false, v -> showPage(0));
         timeChip = chip("时间 --", false, v -> showPage(0));
+        TextView voiceChip = chip("🎤 释放", true, v -> doReleaseVoice());
         TextView signalChip = chip("📊 信号", true, v -> showPage(1));
         TextView controlChip = chip("🎛 车控", true, v -> showPage(2));
         webChip = chip("🌐 Web: 启动中…", true, v -> showWebInfoDialog());
@@ -326,6 +392,7 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         bar.addView(timeChip);
         View spacer = new View(this);
         bar.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1f));
+        bar.addView(voiceChip);
         bar.addView(signalChip);
         bar.addView(controlChip);
         bar.addView(webChip);
@@ -389,44 +456,8 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
     }
 
     // ═══════════════════════════════════════════════
-    //  空调 / 音量 / 车窗 调节
+    //  开关控制
     // ═══════════════════════════════════════════════
-
-    private void adjustTemp(boolean driver, int delta) {
-        DashboardSnapshot s = latest;
-        int base = halfToC(s == null ? -1 : (driver ? s.driverTempHalf : s.passengerTempHalf));
-        if (base < 0) base = 24;
-        int target = clampTemp(base + delta);
-        if (driver) runCommand("主驾温度 " + target + "℃", () -> vc.setAcTemperatureDriver(target));
-        else runCommand("副驾温度 " + target + "℃", () -> vc.setAcTemperaturePassenger(target));
-    }
-
-    private void adjustFan(int delta) {
-        DashboardSnapshot s = latest;
-        int base = s == null ? -1 : s.fanSpeed;
-        if (base < 0) base = 3;
-        int target = Math.max(1, Math.min(7, base + delta));
-        runCommand("风量 " + target, () -> vc.setAcFanSpeed(target));
-    }
-
-    private void adjustVolume(String key, int delta) {
-        int base = volumeBase(key);
-        if (base < 0) base = 8;
-        final int target = Math.max(0, Math.min(15, base + delta));
-        runCommand(key + " " + target, () -> vc.setGlobalKey(key, String.valueOf(target)));
-    }
-
-    private int volumeBase(String key) {
-        DashboardSnapshot s = latest;
-        if (s == null) return -1;
-        switch (key) {
-            case "C11_MUSIC":  return s.musicVol;
-            case "C11_NAVI":   return s.naviVol;
-            case "C11_SPEECH": return s.speechVol;
-            case "C11_CALL":   return s.callVol;
-            default: return -1;
-        }
-    }
 
     private void onToggleKey(String key, boolean c) {
         switch (key) {
@@ -439,6 +470,10 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
                     () -> c ? vc.mirrorHeatOn() : vc.mirrorHeatOff()); break;
             case "winlock": runCommand(c ? "车窗锁开" : "车窗锁关",
                     () -> c ? vc.windowForbitOn() : vc.windowForbitOff()); break;
+            case "sentinel": runCommand(c ? "哨兵开" : "哨兵关",
+                    () -> vc.setGlobalKey("strCarSentinelMode", c ? "1" : "0")); break;
+            case "speechspeak": runCommand(c ? "语音播报开" : "语音播报关",
+                    () -> vc.setGlobalKey("SPEECH_SPEAK", c ? "1" : "0")); break;
             default: break;
         }
     }
@@ -532,6 +567,12 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
                         Toast.LENGTH_LONG).show());
     }
 
+    private void doReleaseVoice() {
+        boolean ok = vc.releaseVoice();
+        Toast.makeText(this, ok ? "已发送语音释放" : "语音释放失败（见日志）",
+                Toast.LENGTH_SHORT).show();
+    }
+
     // ═══════════════════════════════════════════════
     //  Web 服务
     // ═══════════════════════════════════════════════
@@ -573,22 +614,35 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
             return;
         }
 
-        // 行车
+        float powerKw = (s.voltage >= 0 && s.current >= 0)
+                ? s.voltage * s.current / 1000f : Float.NaN;
+
+        // 仪表 / 波形
+        if (s.speedKmh >= 0) speedGauge.setValue(s.speedKmh);
+        if (s.batterySoc >= 0) socGauge.setValue(s.batterySoc);
+        if (!Float.isNaN(powerKw)) powerGauge.setValue(powerKw);
+        if (s.voltage >= 0) voltageChart.addPoint(s.voltage);
+        if (s.current >= 0) currentChart.addPoint(s.current);
+        if (!Float.isNaN(powerKw)) powerChart.addPoint(powerKw);
+        if (s.speedKmh >= 0) speedChart.addPoint(s.speedKmh);
+
+        // 行车数值
         setInt("soc", s.batterySoc, "%");
         setInt("range", s.rangeDyn >= 0 ? s.rangeDyn : s.rangeStd, "km");
         setFloat("volt", s.voltage, "V");
         setFloat("current", s.current, "A");
-        t("power").setValue(computePower(s), "kW");
+        if (!Float.isNaN(powerKw)) t("power").setValue(fmt1(powerKw), "kW");
+        else t("power").setFailed();
         setInt("speed", s.speedKmh, "km/h");
-        t("gear").setValue(s.gear == null || s.gear.isEmpty() ? null : s.gear, "");
+        t("gear").setValue(s.gear == null || s.gear.isEmpty() ? "--" : s.gear, "");
         setInt("outtemp", s.outsideTemp, "℃");
         setInt("pm25", s.pm25, "");
 
-        // 音量
-        setStep("vol_music", s.musicVol);
-        setStep("vol_navi", s.naviVol);
-        setStep("vol_speech", s.speechVol);
-        setStep("vol_call", s.callVol);
+        // 音量滑块
+        setSliderTile("vol_music", 0, 100, s.musicVol, "");
+        setSliderTile("vol_navi", 0, 100, s.naviVol, "");
+        setSliderTile("vol_speech", 0, 100, s.speechVol, "");
+        setSliderTile("vol_call", 0, 100, s.callVol, "");
 
         // 胎压
         setTire("tire_fl", s, 0);
@@ -604,16 +658,28 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         setDoor("trunk_state", s.doorStates, 4);
         setDoor("hood", s.doorStates, 5);
 
-        // 空调
-        setStepC("temp_driver", s.driverTempHalf);
-        setStepC("temp_pass", s.passengerTempHalf);
-        setStep("fan", s.fanSpeed);
+        // 空调滑块 + 开关
+        if (s.driverTempHalf >= 0)
+            setSliderTile("temp_driver", 16, 32, Math.round(s.driverTempHalf / 2f), "℃");
+        if (s.passengerTempHalf >= 0)
+            setSliderTile("temp_pass", 16, 32, Math.round(s.passengerTempHalf / 2f), "℃");
+        setSliderTile("fan", 1, 7, s.fanSpeed, "档");
         setToggle("ac", s.acSwitch);
         setToggle("innerloop", s.innerCycle);
         setToggle("frontdef", s.frontDefrost);
         setToggle("reardef", s.rearDefrost);
         setToggle("mirrorheat", s.mirrorHeat);
         setToggle("winlock", s.windowForbit);
+        setToggle("sentinel", extraInt(s, "strCarSentinelMode"));
+        setToggle("speechspeak", extraInt(s, "SPEECH_SPEAK"));
+
+        // 额外 settings 原始状态
+        setRawTile("bt", s.extra.get("strCarBluetoothStatus"));
+        setRawTile("wifi", s.extra.get("strCarWifiStatus"));
+        setRawTile("ble", s.extra.get("strCarBleState"));
+        setRawTile("ptc", s.extra.get("strCarPTCOutTemp"));
+        setRawTile("ambient", s.extra.get("strCar1800"));
+        setRawTile("airstatus", s.extra.get("strCarAirStatus"));
 
         // 车窗标签
         for (int i = 0; i < 4; i++) {
@@ -633,17 +699,26 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         else t(id).setFailed();
     }
 
+    private void setSliderTile(String id, int min, int max, int value, String unit) {
+        if (value >= 0) t(id).setSlider(min, max, value, unit);
+    }
+
+    private void setRawTile(String id, String raw) {
+        TileView t = t(id);
+        if (raw == null || raw.trim().isEmpty() || "null".equals(raw.trim())) t.setFailed();
+        else t.setValue(raw.trim(), "");
+    }
+
+    private static int extraInt(DashboardSnapshot s, String key) {
+        String v = s.extra.get(key);
+        if (v == null) return -1;
+        try { return (int) Math.floor(Double.parseDouble(v.trim())); }
+        catch (Exception e) { return -1; }
+    }
+
     private void setFloat(String id, float value, String unit) {
         if (value >= 0) t(id).setValue(fmt1(value), unit);
         else t(id).setFailed();
-    }
-
-    private void setStep(String id, int value) {
-        t(id).setStepValue(value >= 0 ? String.valueOf(value) : null);
-    }
-
-    private void setStepC(String id, int half) {
-        t(id).setStepValue(half >= 0 ? String.valueOf(halfToC(half)) : null);
     }
 
     private void setToggle(String id, int value) {
@@ -668,20 +743,6 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
 
     private static String doorWord(int st) {
         return st == 0 ? "关" : st == 1 ? "开" : String.valueOf(st);
-    }
-
-    /** 功率 kW = 电压 V × 电流 A / 1000；任一缺失返 null（显失败，不臆测） */
-    private static String computePower(DashboardSnapshot s) {
-        if (s.voltage >= 0 && s.current >= 0) return fmt1(s.voltage * s.current / 1000f);
-        return null;
-    }
-
-    private static int clampTemp(int t) {
-        return Math.max(16, Math.min(32, t));
-    }
-
-    private static int halfToC(int half) {
-        return half < 0 ? -1 : Math.round(half / 2f);
     }
 
     private static String fmt1(float v) {

@@ -1,12 +1,14 @@
 package com.c11.cartool.dashboard;
 
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.graphics.Typeface;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.SeekBar;
 import android.widget.TextView;
 
 /**
@@ -15,7 +17,7 @@ import android.widget.TextView;
  * <p>四种类型：
  * <ul>
  *   <li>{@link Type#VALUE} 只读数值：标签 + 大数值/单位 + 副行；</li>
- *   <li>{@link Type#STEP} 步进：标签 + [− 当前值 +]（建议占 2×1，−/+ ≥76dp）；</li>
+ *   <li>{@link Type#SLIDER} 滑块：标签 + 当前值 + SeekBar（温度 / 音量 / 档位，触摸区 ≥48dp）；</li>
  *   <li>{@link Type#TOGGLE} 开关：整格可点，按 checked 切换玻璃色调与"开/关"；</li>
  *   <li>{@link Type#ACTION} 动作：整格可点，显示图标 + 文字。</li>
  * </ul>
@@ -23,10 +25,10 @@ import android.widget.TextView;
  */
 public class TileView extends FrameLayout {
 
-    public enum Type { VALUE, STEP, TOGGLE, ACTION }
+    public enum Type { VALUE, SLIDER, TOGGLE, ACTION }
 
     public interface Listener {
-        default void onStep(int delta) {}
+        default void onSlider(int value) {}
         default void onToggle(boolean checked) {}
         default void onPress() {}
     }
@@ -41,6 +43,11 @@ public class TileView extends FrameLayout {
     private TextView subView;
     private TextView stateView;
     private TextView badgeView;
+    private SeekBar seekBar;
+
+    /** SLIDER 真实最小值（SeekBar 原生 min=0，用偏移映射）与单位后缀 */
+    private int sliderMin = 0;
+    private String sliderUnit = "";
 
     private Listener listener;
     private boolean checked;
@@ -74,8 +81,8 @@ public class TileView extends FrameLayout {
             case VALUE:
                 buildValue();
                 break;
-            case STEP:
-                buildStep();
+            case SLIDER:
+                buildSlider();
                 break;
             case TOGGLE:
                 buildToggle();
@@ -107,25 +114,6 @@ public class TileView extends FrameLayout {
         root.addView(subView);
     }
 
-    private void buildStep() {
-        root.addView(labelView);
-        LinearLayout row = new LinearLayout(getContext());
-        row.setGravity(Gravity.CENTER);
-        TextView minus = stepButton("−");
-        valueView = make(GridDimens.SP_STEP_VAL, DashboardTheme.TEXT, true);
-        valueView.setText("--");
-        valueView.setGravity(Gravity.CENTER);
-        TextView plus = stepButton("+");
-        row.addView(minus, new LinearLayout.LayoutParams(0, dp(76), 1f));
-        row.addView(valueView, new LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1.2f));
-        row.addView(plus, new LinearLayout.LayoutParams(0, dp(76), 1f));
-        root.addView(row, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
-
-        minus.setOnClickListener(v -> { if (listener != null) listener.onStep(-1); });
-        plus.setOnClickListener(v -> { if (listener != null) listener.onStep(1); });
-    }
-
     private void buildToggle() {
         stateView = make(GridDimens.SP_ACTION, DashboardTheme.DIM, true);
         stateView.setText("关");
@@ -148,13 +136,37 @@ public class TileView extends FrameLayout {
         setOnClickListener(v -> { if (listener != null) listener.onPress(); });
     }
 
-    private TextView stepButton(String s) {
-        TextView b = make(GridDimens.SP_STEP_BTN, DashboardTheme.TEXT, true);
-        b.setText(s);
-        b.setGravity(Gravity.CENTER);
-        b.setBackground(Glass.bg(getContext(), 10, Glass.NORMAL));
-        b.setClickable(true);
-        return b;
+    private void buildSlider() {
+        // 顶部：标签（左）+ 当前真实值（右）
+        LinearLayout head = new LinearLayout(getContext());
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        labelView.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        valueView = make(GridDimens.SP_STEP_VAL, DashboardTheme.TEXT, true);
+        valueView.setText("--");
+        valueView.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        head.addView(labelView, new LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f));
+        head.addView(valueView);
+        root.addView(head);
+
+        // SeekBar：填充剩余高度，进度蓝 / 滑块白，上下留白使触摸区 ≥48dp
+        seekBar = new SeekBar(getContext());
+        seekBar.setMax(100);
+        seekBar.setProgressTintList(ColorStateList.valueOf(0xFF3B82F6));
+        seekBar.setThumbTintList(ColorStateList.valueOf(0xFFFFFFFF));
+        seekBar.setSplitTrack(false);
+        seekBar.setKeyProgressIncrement(1);
+        seekBar.setPadding(dp(4), dp(10), dp(4), dp(10));
+        root.addView(seekBar, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar sb, int p, boolean fromUser) {
+                if (fromUser && valueView != null) valueView.setText(sliderMin + p + sliderUnit);
+            }
+            @Override public void onStartTrackingTouch(SeekBar sb) {}
+            @Override public void onStopTrackingTouch(SeekBar sb) {
+                if (listener != null) listener.onSlider(sliderMin + sb.getProgress());
+            }
+        });
     }
 
     // ── 数据更新 ──
@@ -173,10 +185,17 @@ public class TileView extends FrameLayout {
         if (subView != null) subView.setText(sub == null ? "" : sub);
     }
 
-    public void setStepValue(String value) {
+    /** 配置滑块范围与当前值（传真实值，内部自动映射 SeekBar 0 偏移与单位显示）。 */
+    public void setSlider(int min, int max, int value, String unit) {
         failed = false;
+        this.sliderMin = min;
+        this.sliderUnit = unit == null ? "" : unit;
+        if (seekBar != null) {
+            seekBar.setMax(Math.max(1, max - min));
+            seekBar.setProgress(Math.max(0, Math.min(max - min, value - min)));
+        }
         if (valueView != null) {
-            valueView.setText(value == null ? "--" : value);
+            valueView.setText(value + sliderUnit);
             valueView.setTextColor(DashboardTheme.TEXT);
         }
     }

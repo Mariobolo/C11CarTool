@@ -34,6 +34,14 @@ public class DashboardSnapshot {
     public volatile int  speechVol    = -1;  // C11_SPEECH
     public volatile int  callVol      = -1;  // C11_CALL
 
+    /**
+     * 额外 settings global 键的原始值（dump 中存在但未单列强类型字段）：
+     * 蓝牙/WiFi/BLE 状态、PTC 出风温度、氛围灯、哨兵、语音播报、防冷风、后备箱 / 空调模式等。
+     * 保留原始字符串，不臆测类型与枚举；UI 直接展示或自行解析 0/1。
+     */
+    public final java.util.Map<String, String> extra =
+            new java.util.LinkedHashMap<String, String>();
+
     // ── logcat 解析（高频实时量） ──
     public volatile int  batterySoc   = -1;  // figure / eventId 3162 %
     public volatile float voltage     = -1;  // eventId 3130 V

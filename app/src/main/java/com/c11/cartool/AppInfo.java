@@ -10,10 +10,10 @@ public final class AppInfo {
     private AppInfo() {}
 
     /** 版本号（与 build.gradle versionName 保持一致） */
-    public static final String VERSION = "0.3.9";
+    public static final String VERSION = "0.3.10";
 
     /** 内部版本号（与 build.gradle versionCode 保持一致） */
-    public static final int VERSION_CODE = 15;
+    public static final int VERSION_CODE = 16;
 
     /** 应用显示名 */
     public static final String APP_NAME = "C11 车控";

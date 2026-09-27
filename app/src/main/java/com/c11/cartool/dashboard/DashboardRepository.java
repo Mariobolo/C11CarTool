@@ -139,6 +139,9 @@ public class DashboardRepository {
             String val = t.substring(i + 1).trim();
             if (val.isEmpty()) continue;
 
+            // 额外关注键：原样留存（不臆测类型），供主界面全量模块展示
+            if (EXTRA_KEYS.contains(key)) snap.extra.put(key, val);
+
             // 数字值才驱动卡片；非数字值（字符串状态）不丢弃，仍在信号清单原样展示
             int iv = Integer.MIN_VALUE;
             try { iv = (int) Math.floor(Double.parseDouble(val)); }
@@ -177,6 +180,14 @@ public class DashboardRepository {
     }
 
     // ─────────────── 信号清单组装（多渠道并列 + 分组排序）───────────────
+
+    /** 主界面专门展示的额外键：settings dump 中存在，原样收集到 {@link DashboardSnapshot#extra}。 */
+    private static final java.util.Set<String> EXTRA_KEYS =
+            new java.util.HashSet<String>(java.util.Arrays.asList(
+                    "strCarAirStatus", "strCarAntiColdWindMode", "strCarPTCOutTemp",
+                    "strCarTrunkState", "strCar1800",
+                    "strCarBluetoothStatus", "strCarWifiStatus", "strCarBleState",
+                    "strCarSentinelMode", "SPEECH_SPEAK"));
 
     /** settings 键元数据：{分组, 中文名, 类型(switch/temp/fan/vol/pm)}。 */
     private static final java.util.LinkedHashMap<String, String[]> SETTINGS_META =
