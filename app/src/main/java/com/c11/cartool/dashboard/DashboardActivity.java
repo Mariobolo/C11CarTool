@@ -73,6 +73,10 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
     private final int[] lastDoor = {-1, -1, -1, -1, -1, -1};
     private int innerLoopMode = 1;
 
+    // [FIX-20260928] 主题（A=纯色光晕 / B=必应壁纸），ThemeManager 持久化，切换入口见状态条 🎨
+    private ThemeManager themeManager;
+    private LinearLayout rootView;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -92,6 +96,7 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         Logger.title(AppInfo.TITLE + " 启动");
         Logger.info("设备: " + android.os.Build.MODEL + "，Android " + android.os.Build.VERSION.RELEASE);
 
+        themeManager = new ThemeManager(this);   // [FIX-20260928] 主题选择+持久化（原先有类无接线）
         buildUi();
         startWebAuto();
 
@@ -116,14 +121,8 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
     private void buildUi() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackground(Glass.wallpaper(this));
-        // [FIX-20260928] 自动壁纸：必应每日壁纸（模糊）加载成功后替换背景，失败保留彩色光晕壁纸
-        final LinearLayout rootFinal = root;
-        BingWallpaper.loadAsync(this, bmp -> {
-            if (bmp != null && !isFinishing() && !isDestroyed()) {
-                rootFinal.setBackground(new android.graphics.drawable.BitmapDrawable(getResources(), bmp));
-            }
-        });
+        rootView = root;
+        applyThemeBackground();   // [FIX-20260928] 按主题 A/B 应用背景（壁纸失败自动降级主题 A）
 
         root.addView(buildStatusBar(), new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
@@ -427,6 +426,7 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         TextView signalChip = chip("📊 信号", true, v -> showPage(1));
         TextView controlChip = chip("🎛 车控", true, v -> showPage(2));
         webChip = chip("🌐 Web: 启动中…", true, v -> showWebInfoDialog());
+        TextView themeChip = chip("🎨 主题", true, v -> toggleTheme());   // [FIX-20260928] 主题切换入口
 
         bar.addView(adbChip);
         bar.addView(gearChip);
@@ -439,6 +439,7 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         bar.addView(signalChip);
         bar.addView(controlChip);
         bar.addView(webChip);
+        bar.addView(themeChip);
         return bar;
     }
 
@@ -826,6 +827,37 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
     // ═══════════════════════════════════════════════
     //  沉浸模式 / 工具
     // ═══════════════════════════════════════════════
+
+    // ═══════════════════════════════════════
+    //  主题（毛玻璃 / 仿 iOS 玻璃拟态）
+    // ═══════════════════════════════════════
+
+    /**
+     * [FIX-20260928] 主题背景应用（即时生效，无需重启）：
+     * 主题 A = 纯色深色渐变 + 彩色光晕（Glass.wallpaper，本身即玻璃拟态底）；
+     * 主题 B = 必应每日壁纸（后台一次性高斯模糊 + 本地缓存，Android 9 用 RenderScript，
+     * 不用 AGSL/RenderEffect、不做实时模糊）；加载失败自动降级主题 A 底。
+     * 两套主题的模块均为半透明毛玻璃（Glass 卡片），不随主题变化。
+     */
+    private void applyThemeBackground() {
+        if (rootView == null) return;
+        rootView.setBackground(Glass.wallpaper(this));   // 先给 A 兜底
+        if (themeManager == null || !themeManager.isBing()) return;
+        BingWallpaper.loadAsync(this, bmp -> {
+            if (bmp != null && !isFinishing() && !isDestroyed() && themeManager.isBing()) {
+                rootView.setBackground(new android.graphics.drawable.BitmapDrawable(getResources(), bmp));
+            }
+        });
+    }
+
+    /** 主题切换（状态条 🎨）：A ⇄ B，持久化 + 即时生效 */
+    private void toggleTheme() {
+        themeManager.set(themeManager.isBing() ? ThemeManager.THEME_SOLID : ThemeManager.THEME_BING);
+        applyThemeBackground();
+        Toast.makeText(this,
+                themeManager.isBing() ? "主题B：必应壁纸 · 毛玻璃" : "主题A：纯色光晕 · 毛玻璃",
+                Toast.LENGTH_SHORT).show();
+    }
 
     private void enterImmersive() {
         // [FIX-20260928] 全屏：补 FLAG_FULLSCREEN 窗口标志（仅系统 UI 标志时部分车机仍留状态栏）

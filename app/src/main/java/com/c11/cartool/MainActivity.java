@@ -1030,6 +1030,15 @@ public class MainActivity extends Activity {
     //  参数行
     // ═══════════════════════════════════════
 
+    // [FIX-20260928] 解析 "min-max" 数值区间（如 0-100、16-30、0-7）；枚举/开关串（含"="）返回 null
+    private static int[] parseRange(String range) {
+        if (range == null || range.contains("=")) return null;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d+)\\s*-\\s*(\\d+)").matcher(range);
+        if (!m.find()) return null;
+        int a = Integer.parseInt(m.group(1)), b = Integer.parseInt(m.group(2));
+        return b > a ? new int[]{a, b} : null;
+    }
+
     private View makeParamRow(String[] param) {
         String key = param[0], name = param[1], type = param[2], ns = param[3], hint = param[4], range = param[5];
 
@@ -1125,8 +1134,39 @@ public class MainActivity extends Activity {
             });
         }));
 
-        // ON / OFF
-        if (type.equals("bool") || type.equals("int")) {
+        // [FIX-20260928] 百分比/数值区间参数改滑块（原对 0-100 类取值也给 ON/OFF 开关，无意义）
+        final int[] rng = parseRange(range);
+        if (type.equals("int") && rng != null) {
+            android.widget.SeekBar sBar = new android.widget.SeekBar(this);
+            sBar.setMax(rng[1] - rng[0]);
+            LinearLayout.LayoutParams sLp = new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.2f);
+            sLp.setMargins(6, 0, 6, 0);
+            sBar.setLayoutParams(sLp);
+            sBar.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(android.widget.SeekBar sb2, int p, boolean fromUser) {
+                    if (fromUser) valTv.setText(String.valueOf(rng[0] + p));
+                }
+                @Override public void onStartTrackingTouch(android.widget.SeekBar sb2) {}
+                @Override public void onStopTrackingTouch(android.widget.SeekBar sb2) {
+                    final int v = rng[0] + sb2.getProgress();
+                    Sh.submitAsync(() -> {
+                        Sh.Result sr = VehicleControl.setSetting(key, String.valueOf(v), ns);
+                        boolean ok = sr != null && sr.ok();
+                        if (ok) Logger.ok(name + " → " + v + " (" + ns + ")");
+                        else Logger.error(name + " → " + v + " 写入失败: " + (sr == null ? "?" : sr.toDiagnosticString()));
+                        h.post(() -> {
+                            valTv.setText(ok ? String.valueOf(v) : "失败");
+                            valTv.setTextColor(ok ? C_YELLOW : C_RED);
+                        });
+                    });
+                }
+            });
+            line2.addView(sBar);
+        }
+
+        // ON / OFF（仅 bool 或无区间的 int）
+        if (type.equals("bool") || (type.equals("int") && rng == null)) {
             line2.addView(makeSmallBtn("ON", C_GREEN, v -> {
                 Sh.submitAsync(() -> {
                     long t = System.currentTimeMillis();
