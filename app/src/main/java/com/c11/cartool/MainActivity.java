@@ -17,6 +17,7 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -52,6 +53,8 @@ public class MainActivity extends Activity {
     private EditText searchBox;
     private SharedPreferences prefs;
     private com.c11.cartool.vehicle.VehicleController vehicleController;
+    /** 进行中的车控顺序实验（页面销毁时取消，见 onDestroy） */
+    private CarControlExperiment.RunHandle experimentRun;
 
     // ADB 连接配置
     private String adbHost = "127.0.0.1";
@@ -120,9 +123,21 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         h = new Handler(Looper.getMainLooper());
+        // [FIX-20260928] 全屏：隐藏状态栏 + 沉浸式导航（工程模式同样全屏）
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
 
         // 安装全局异常捕获（必须在最前面）
         CrashHandler.install(this);
+        // 日志始终落盘（下载目录/软件同名目录，logcat + 软件日志双体系）
+        LogStore.init(this);
 
         // 设置 Shell 上下文（用于 ADB 密钥存储）
         Sh.setContext(this);
@@ -1117,13 +1132,20 @@ public class MainActivity extends Activity {
                     long t = System.currentTimeMillis();
                     if (tryBroadcastControl(key, true)) {
                         h.post(() -> { valTv.setText("1"); valTv.setTextColor(C_GREEN); });
+                        Logger.ok(name + " → ON (" + (System.currentTimeMillis() - t) + "ms)");
                     } else if ("prop".equals(ns)) {
                         Logger.warn("getprop 不支持写入: " + key);
                     } else {
-                        VehicleControl.setSetting(key, "1", ns);
-                        h.post(() -> { valTv.setText("1"); valTv.setTextColor(C_GREEN); });
+                        // [FIX-20260927] 按实际结果更新 UI（原为乐观显示：失败也显示已开）
+                        Sh.Result sr = VehicleControl.setSetting(key, "1", ns);
+                        boolean okw = sr != null && sr.ok();
+                        h.post(() -> {
+                            valTv.setText(okw ? "1" : "失败");
+                            valTv.setTextColor(okw ? C_GREEN : C_RED);
+                        });
+                        if (okw) Logger.ok(name + " → ON (" + (System.currentTimeMillis() - t) + "ms)");
+                        else Logger.error(name + " → ON 写入失败（UI 已标注）: " + (sr == null ? "?" : sr.toDiagnosticString()));
                     }
-                    Logger.ok(name + " → ON (" + (System.currentTimeMillis() - t) + "ms)");
                 });
             }));
             line2.addView(makeSmallBtn("OFF", C_RED, v -> {
@@ -1131,13 +1153,20 @@ public class MainActivity extends Activity {
                     long t = System.currentTimeMillis();
                     if (tryBroadcastControl(key, false)) {
                         h.post(() -> { valTv.setText("0"); valTv.setTextColor(C_RED); });
+                        Logger.ok(name + " → OFF (" + (System.currentTimeMillis() - t) + "ms)");
                     } else if ("prop".equals(ns)) {
                         Logger.warn("getprop 不支持写入: " + key);
                     } else {
-                        VehicleControl.setSetting(key, "0", ns);
-                        h.post(() -> { valTv.setText("0"); valTv.setTextColor(C_RED); });
+                        // [FIX-20260927] 按实际结果更新 UI（原为乐观显示：失败也显示已关）
+                        Sh.Result sr = VehicleControl.setSetting(key, "0", ns);
+                        boolean okw = sr != null && sr.ok();
+                        h.post(() -> {
+                            valTv.setText(okw ? "0" : "失败");
+                            valTv.setTextColor(okw ? C_RED : 0xFFFF9800);
+                        });
+                        if (okw) Logger.ok(name + " → OFF (" + (System.currentTimeMillis() - t) + "ms)");
+                        else Logger.error(name + " → OFF 写入失败（UI 已标注）: " + (sr == null ? "?" : sr.toDiagnosticString()));
                     }
-                    Logger.ok(name + " → OFF (" + (System.currentTimeMillis() - t) + "ms)");
                 });
             }));
         }
@@ -1463,7 +1492,32 @@ public class MainActivity extends Activity {
         }
     }
 
+    @Override
+    protected void onDestroy() {
+        // [FIX] 生命周期清理：取消进行中的车控实验，防止后台线程继续驱动 UI 弹框
+        CarControlExperiment.RunHandle r = experimentRun;
+        if (r != null) r.cancel();
+        super.onDestroy();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        // [FIX-20260928] 全屏：焦点回归时重套沉浸式（系统栏被拉出后自动恢复）
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        }
+    }
+
     private void showResultDialog(String title, String content) {
+        // [FIX] Activity 已退出不再弹框（异步回调统一守卫），避免 BadTokenException
+        if (isFinishing() || isDestroyed()) return;
         new AlertDialog.Builder(this)
                 .setTitle(title)
                 .setMessage(content.isEmpty() ? "(空)" : content)
@@ -1729,15 +1783,19 @@ public class MainActivity extends Activity {
             return;
         }
         java.util.List<CarControlExperiment.Step> steps = CarControlExperiment.buildDefaultSteps(vehicleController);
-        CarControlExperiment.runAsync(steps, new CarControlExperiment.Callback() {
+        experimentRun = CarControlExperiment.runAsync(steps, new CarControlExperiment.Callback() {
             @Override public void onConfirmRequest(CarControlExperiment.Step step, CarControlExperiment.ConfirmListener listener) {
-                h.post(() -> new AlertDialog.Builder(MainActivity.this)
+                h.post(() -> {
+                    // [FIX] 页面已退出不再弹框，避免 BadTokenException
+                    if (isFinishing() || isDestroyed()) return;
+                    new AlertDialog.Builder(MainActivity.this)
                         .setTitle("执行: " + step.title)
                         .setMessage(step.confirmText + "\n\n通道: " + step.channel + "\n\n请观察车辆是否响应后选择：")
                         .setPositiveButton("✅ 执行", (d, w) -> { d.dismiss(); listener.onConfirmed(); })
                         .setNegativeButton("⏭️ 跳过", (d, w) -> { d.dismiss(); listener.onSkipped(); })
                         .setCancelable(false)
-                        .show());
+                        .show();
+                });
             }
             @Override public void onProgress(String message) { h.post(() -> Logger.info(message)); }
             @Override public void onStepResult(CarControlExperiment.Step step, CarControlExperiment.StepResult result, String detail) {

@@ -35,7 +35,15 @@ public class VehicleController {
 
     /** 最近一次 shell 通道执行结果（一键全测读取，含 exit/stdout/stderr/通道）；Intent 通道为 null */
     private static volatile com.c11.cartool.Sh.Result lastResult;
+    /** 线程本地镜像：并发命令不串味（一键全测按线程取本次结果） */
+    private static final ThreadLocal<com.c11.cartool.Sh.Result> lastResultTL = new ThreadLocal<>();
     public static com.c11.cartool.Sh.Result lastResult() { return lastResult; }
+    /** 当前线程最近一次 shell 结果（供 WorkbenchTest 判定，免受其他线程命令干扰） */
+    public static com.c11.cartool.Sh.Result lastResultOfThread() { return lastResultTL.get(); }
+    private static void setLastResult(com.c11.cartool.Sh.Result r) {
+        lastResult = r;
+        lastResultTL.set(r);
+    }
 
     public VehicleController(Context ctx) {
         this.context = ctx != null ? ctx.getApplicationContext() : null;
@@ -68,9 +76,38 @@ public class VehicleController {
     // 前雾灯（CARLIGHT_FRONTFOGCTL）
     public boolean frontFogOn()    { return sendLegacy(ACTION_TO_CAR_CONTROL, "CARLIGHT_FRONTFOGCTL", 1); }
     public boolean frontFogOff()   { return sendLegacy(ACTION_TO_CAR_CONTROL, "CARLIGHT_FRONTFOGCTL", 0); }
-    /** 阅读灯/氛围灯通用（CARLIGHT_*DOMELAMPCTRL，state 0关 1开），名字→通道归车辆层 */
+    /** 阅读灯/氛围灯旧广播通道（CARLIGHT_*DOMELAMPCTRL，state 0关 1开；type 为逆向猜测串） */
     public boolean domeLight(String type, boolean on) {
         return sendLegacy(ACTION_TO_CAR_CONTROL, type, on ? 1 : 0);
+    }
+
+    /**
+     * 阅读灯（新主通道）。
+     * [FIX-20260928] 用户反馈旧广播无效，改走 handMessage 语音家族（已验证家族，
+     * 实体名与真机事件名一致：前阅读灯/前左阅读灯/前右阅读灯/后左阅读灯/后右阅读灯，
+     * 见 LogcatVehicleSource eventId 1007-1012）；失败再退回旧广播兜底。
+     */
+    public boolean readingLight(String name, boolean on) {
+        boolean ok = sendVoice("carControl", obj()
+                .put("operation", on ? "OPEN" : "CLOSE").put("name", name));
+        if (!ok) {
+            // 旧广播兜底（type 猜测串，保留供对照）
+            String opcode = "CARLIGHT_" + READING_LIGHT_OPCODE.get(name);
+            if (READING_LIGHT_OPCODE.get(name) != null)
+                ok = sendLegacy(ACTION_TO_CAR_CONTROL, opcode, on ? 1 : 0);
+        }
+        return ok;
+    }
+
+    private static final java.util.Map<String, String> READING_LIGHT_OPCODE =
+            new java.util.HashMap<String, String>();
+    static {
+        READING_LIGHT_OPCODE.put("前左阅读灯", "FLDOMELAMPCTRL");
+        READING_LIGHT_OPCODE.put("前右阅读灯", "FRDOMELAMPCTRL");
+        READING_LIGHT_OPCODE.put("后左阅读灯", "RLDOMELAMPCTRL");
+        READING_LIGHT_OPCODE.put("后右阅读灯", "RRDOMELAMPCTRL");
+        READING_LIGHT_OPCODE.put("前阅读灯", "FDDOMELAMPCTRL");
+        READING_LIGHT_OPCODE.put("后阅读灯", "RDDOMELAMPCTRL");
     }
 
     // ═══ 空调 — 混合通道 ═══
@@ -107,11 +144,24 @@ public class VehicleController {
         key = sanitizeShellArg(key);
         value = sanitizeShellArg(value);
         Sh.Result w = Sh.run("settings put global " + key + " " + value, 8000);
-        // [FIX] 不再 Thread.sleep(1200) 阻塞，改为读取时自带延迟
-        Sh.Result g = Sh.run("settings get global " + key, 6000);
-        lastResult = g;
-        String rb = g == null || g.out == null ? "" : g.out.trim();
-        boolean match = w != null && w.exit == 0 && rb.equals(value);
+        // [FIX-20260927] 回读带重试：车机镜像/写入落地存在时延，写后立即回读会误报失败
+        // （原实现声称“读取自带延迟”但实际没有任何等待）。
+        // 最多回读 3 次（间隔 250/500ms），任一次一致即判成功；写入本身带 timeout 判定（w.ok()）。
+        String rb = "";
+        boolean match = false;
+        Sh.Result g = null;
+        for (int i = 0; i < 3 && !match; i++) {
+            if (i > 0) {
+                try { Thread.sleep(250L * i); } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            g = Sh.run("settings get global " + key, 6000);
+            rb = g == null || g.out == null ? "" : g.out.trim();
+            match = w != null && w.ok() && rb.equals(value);
+        }
+        setLastResult(g);
         Logger.cmd("settings put global " + key + "=" + value + " → 回读=" + rb + (match ? " ✅" : " ❌"),
                    g != null ? g : w);
         return match;
@@ -156,6 +206,13 @@ public class VehicleController {
     }
 
     public boolean setAirInnerLoop(boolean inner) { return putGlobal(K_AIR_INNER, inner ? "1" : "0"); }
+
+    // [FIX-20260928] 内外循环补自动模式：0=外循环 1=内循环 2=自动（自动值待实车回读确认）
+    public static final int LOOP_OUT = 0, LOOP_IN = 1, LOOP_AUTO = 2;
+    public boolean setAirInnerLoopMode(int mode) {
+        if (mode < 0 || mode > 2) return false;
+        return putGlobal(K_AIR_INNER, String.valueOf(mode));
+    }
     public boolean frontDefrostOn()  { return putGlobal(K_FRONT_DEFROST, "1"); }
     public boolean frontDefrostOff() { return putGlobal(K_FRONT_DEFROST, "0"); }
     public boolean rearDefrostOn()   { return putGlobal(K_REAR_DEFROST, "1"); }
@@ -166,13 +223,22 @@ public class VehicleController {
     public boolean mirrorHeatOff()   { return putGlobal("strCarMirrorHeart", "0"); }
     public boolean windowForbitOn()  { return putGlobal("strCarWindowForbit", "1"); }
     public boolean windowForbitOff() { return putGlobal("strCarWindowForbit", "0"); }
-    public boolean openAcPage()      { return putGlobal("strCar100006", "1"); }
+    // [FIX-20260928] 空调界面：strCar100006 只有值变化才触发 HMI 开页（边缘触发），
+    // 原实现直接写 1，键已是 1 时无响应（用户反馈“空调界面无响应”即此因）。
+    public boolean openAcPage() {
+        Sh.run("settings put global strCar100006 0", 6000);
+        try { Thread.sleep(150); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        return putGlobal("strCar100006", "1");
+    }
 
     /**
-     * 空调运行模式（strCarAirStatus：自动/制冷/制热/通风）。
-     * 各模式对应的整数值需真机切换并回读标定，故只提供 raw 写入，页面标注 ⚠ 待标定，不臆测枚举。
+     * 空调运行模式（strCarAirStatus）。
+     * [FIX-20260928] 用户实测映射：0=自动 1=制冷 2=制热 3=制冷（3 或为强冷/除湿，待实车确认）。
      */
-    public boolean setAirStatusRaw(int mode) { return putGlobal("strCarAirStatus", String.valueOf(mode)); }
+    public static final int AIR_MODE_AUTO = 0, AIR_MODE_COOL = 1, AIR_MODE_HEAT = 2, AIR_MODE_COOL2 = 3;
+    public boolean setAirMode(int mode) { return putGlobal("strCarAirStatus", String.valueOf(mode)); }
+    /** 兼容旧名（raw 写入） */
+    public boolean setAirStatusRaw(int mode) { return setAirMode(mode); }
 
     // ═══ 儿童锁 — handMessage（开/关成对，格式已验证）═══
     public boolean leftChildLockOn()  { return sendVoice("carControl", obj().put("operation", "OPEN").put("name", "左边儿童锁")); }
@@ -229,7 +295,7 @@ public class VehicleController {
                 String cmd = "am startservice -n " + VOICE_RELEASE_PKG + "/" + VOICE_RELEASE_CLS
                         + " --ez stopvr true";
                 Sh.Result r = Sh.run(cmd);
-                lastResult = r;
+                setLastResult(r);
                 Logger.cmd(cmd, r);
                 return r.exit == 0;
             } else {
@@ -251,6 +317,38 @@ public class VehicleController {
         return sendLegacy(ACTION_TO_CAR_CONTROL, type, 1);
     }
 
+    /**
+     * 座椅/方向盘功能开关（加热/通风/按摩等）。
+     * [FIX-20260928] 原 VehicleParams 的 leap.seat.* 虚拟键无硬件消费者（读写均无效），
+     * 改走 handMessage 语音家族；实体名 ⚠ 待实车确认（与真机信号命名风格一致）。
+     */
+    public boolean seatFeature(String name, boolean on) {
+        return sendVoice("carControl", obj()
+                .put("operation", on ? "OPEN" : "CLOSE").put("name", name));
+    }
+
+    /**
+     * 后视镜折叠/展开。
+     * [FIX-20260928] 原实现 shellSetProp("leap.vehicle.mirror_fold") 必然无效
+     * （普通 shell 对 leap.* 虚拟键无硬件消费者）；改走 handMessage 语音家族（已验证）。
+     */
+    public boolean mirrorFold(boolean fold) {
+        return sendVoice("carControl", obj()
+                .put("operation", fold ? "CLOSE" : "OPEN").put("name", "后视镜"));
+    }
+
+    /**
+     * 行人警示音开关。
+     * [FIX-20260928] 主通道改 handMessage 语音家族（实体名“行人警示音”）；
+     * 失败退回旧 tocarcontrol 广播 type=PEDESTRIANS_ALERT（原实现仅有此猜测串）。
+     */
+    public boolean pedestrianAlert(boolean on) {
+        boolean ok = sendVoice("carControl", obj()
+                .put("operation", on ? "OPEN" : "CLOSE").put("name", "行人警示音"));
+        if (!ok) ok = sendLegacy(ACTION_TO_CAR_CONTROL, "PEDESTRIANS_ALERT", on ? 1 : 0);
+        return ok;
+    }
+
     /** 实验通道：shell setprop（如后视镜折叠 leap.vehicle.mirror_fold；普通 shell 对 leap.* 多为空）。 */
     public boolean shellSetProp(String key, String val) {
         try {
@@ -258,7 +356,7 @@ public class VehicleController {
             val = sanitizeShellArg(val);
             String cmd = "setprop " + key + " " + val;
             Sh.Result r = Sh.run(cmd);
-            lastResult = r;
+            setLastResult(r);
             Logger.cmd(cmd, r);
             return r.exit == 0;
         } catch (Exception e) {
@@ -271,7 +369,7 @@ public class VehicleController {
     public boolean mediaKey(int code) {
         String cmd = "input keyevent " + code;
         Sh.Result r = Sh.run(cmd);
-        lastResult = r;
+        setLastResult(r);
         Logger.cmd(cmd, r);
         return r.exit == 0;
     }
@@ -289,7 +387,7 @@ public class VehicleController {
             if (Sh.isAdbConnected()) {
                 String cmd = "am broadcast -a " + action + " --es type \"" + type + "\" --ei state " + state;
                 Sh.Result r = Sh.run(cmd);
-                lastResult = r;
+                setLastResult(r);
                 Logger.cmd(cmd, r);
                 return r.exit == 0;
             } else {
@@ -318,7 +416,7 @@ public class VehicleController {
                         + " -p " + HAND_MESSAGE_PACKAGE
                         + " --es value " + shellQuote(payload);
                 Sh.Result r = Sh.run(cmd);
-                lastResult = r;
+                setLastResult(r);
                 Logger.cmd(cmd, r);
                 return r.exit == 0 && (r.out == null || !r.out.contains("Abort"));
             } else {
@@ -350,7 +448,7 @@ public class VehicleController {
                 String cmd = "am start-foreground-service -n " + RW_PKG + "/." + cls
                         + " --es type " + type + " --es state " + state;
                 Sh.Result r = Sh.run(cmd);
-                lastResult = r;
+                setLastResult(r);
                 Logger.cmd(cmd, r);
                 return r.exit == 0;
             } else {

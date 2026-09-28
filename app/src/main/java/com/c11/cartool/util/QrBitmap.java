@@ -23,9 +23,13 @@ public final class QrBitmap {
      */
     public static Bitmap toBitmap(String text, int cellPx) {
         try {
+            if (cellPx < 2) cellPx = 2;   // [FIX] 下限校验，避免 0/负值生成非法位图
             QrCode qr = QrCode.encodeText(text, QrCode.Ecc.MEDIUM);
             int n = qr.size;
-            Bitmap bmp = Bitmap.createBitmap(n * cellPx, n * cellPx, Bitmap.Config.ARGB_8888);
+            // [FIX] 四周留 4 模块静区（ISO/IEC 18004 要求），提升扫码识别率
+            int quiet = 4;
+            int total = n + quiet * 2;
+            Bitmap bmp = Bitmap.createBitmap(total * cellPx, total * cellPx, Bitmap.Config.ARGB_8888);
             Canvas cv = new Canvas(bmp);
             cv.drawColor(0xFFFFFFFF);
             Paint paint = new Paint();
@@ -33,8 +37,8 @@ public final class QrBitmap {
             for (int y = 0; y < n; y++) {
                 for (int x = 0; x < n; x++) {
                     if (qr.getModule(x, y)) {
-                        cv.drawRect(x * cellPx, y * cellPx,
-                                (x + 1) * cellPx, (y + 1) * cellPx, paint);
+                        cv.drawRect((x + quiet) * cellPx, (y + quiet) * cellPx,
+                                (x + quiet + 1) * cellPx, (y + quiet + 1) * cellPx, paint);
                     }
                 }
             }

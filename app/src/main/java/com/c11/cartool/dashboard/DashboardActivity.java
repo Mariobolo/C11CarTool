@@ -19,6 +19,7 @@ import com.c11.cartool.AppInfo;
 import com.c11.cartool.CrashHandler;
 import com.c11.cartool.DiagnosticRunner;
 import com.c11.cartool.LogExport;
+import com.c11.cartool.LogStore;
 import com.c11.cartool.Logger;
 import com.c11.cartool.Sh;
 import com.c11.cartool.WebPages;
@@ -67,10 +68,17 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
     private Sh.StateListener stateListener;
     private final Handler ui = new Handler();
 
+    // [FIX-20260928] 开关合并状态点（绿=已开 红=已关 白=未知）+ 门盖最近有效值缓存 + 循环三态
+    private final java.util.Map<String, Boolean> pairState = new java.util.HashMap<>();
+    private final int[] lastDoor = {-1, -1, -1, -1, -1, -1};
+    private int innerLoopMode = 1;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         CrashHandler.install(this);
+        // 日志始终落盘（下载目录/软件同名目录，logcat + 软件日志双体系）
+        LogStore.init(this);
 
         setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -109,6 +117,13 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackground(Glass.wallpaper(this));
+        // [FIX-20260928] 自动壁纸：必应每日壁纸（模糊）加载成功后替换背景，失败保留彩色光晕壁纸
+        final LinearLayout rootFinal = root;
+        BingWallpaper.loadAsync(this, bmp -> {
+            if (bmp != null && !isFinishing() && !isDestroyed()) {
+                rootFinal.setBackground(new android.graphics.drawable.BitmapDrawable(getResources(), bmp));
+            }
+        });
 
         root.addView(buildStatusBar(), new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
@@ -207,23 +222,24 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         slider("fan", "风量", 1, 7, 3, "档", vc::setAcFanSpeed);
         toggle("ac", "空调", "ac");
         toggle("acmax", "最大制冷", "max");
-        toggle("innerloop", "内外循环", "inner");
+        innerLoopTile();   // [FIX-20260928] 三态轮转（外→内→自动），补齐自动模式
         toggle("frontdef", "前除霜", "front");
         toggle("reardef", "后除霜", "rear");
         toggle("mirrorheat", "后视镜加热", "mirror");
         toggle("winlock", "车窗锁", "winlock");
-        action("airraw0", "模式0", () -> vc.setAirStatusRaw(0));
-        action("airraw1", "模式1", () -> vc.setAirStatusRaw(1));
-        action("airraw2", "模式2", () -> vc.setAirStatusRaw(2));
-        action("airraw3", "模式3", () -> vc.setAirStatusRaw(3));
+        // [FIX-20260928] 空调模式按用户实测映射标注：0=自动 1=制冷 2=制热 3=制冷(待确认)
+        action("airraw0", "模式·自动", () -> vc.setAirMode(0));
+        action("airraw1", "模式·制冷", () -> vc.setAirMode(1));
+        action("airraw2", "模式·制热", () -> vc.setAirMode(2));
+        action("airraw3", "模式·制冷3", () -> vc.setAirMode(3));
         actionRun("acpage", "空调界面", vc::openAcPage);
 
-        // 阅读灯
+        // [FIX-20260928] 阅读灯：开/关合并为单按钮 + 状态点；通道改 handMessage（见 VehicleController.readingLight）
         group("📖 阅读灯");
-        domeActions("read_fl", "前左阅读灯", "CARLIGHT_FLDOMELAMPCTRL");
-        domeActions("read_fr", "前右阅读灯", "CARLIGHT_FRDOMELAMPCTRL");
-        domeActions("read_rl", "左后阅读灯", "CARLIGHT_RLDOMELAMPCTRL");
-        domeActions("read_rr", "右后阅读灯", "CARLIGHT_RRDOMELAMPCTRL");
+        pairTile("read_fl", "前左阅读灯", () -> vc.readingLight("前左阅读灯", true), () -> vc.readingLight("前左阅读灯", false));
+        pairTile("read_fr", "前右阅读灯", () -> vc.readingLight("前右阅读灯", true), () -> vc.readingLight("前右阅读灯", false));
+        pairTile("read_rl", "后左阅读灯", () -> vc.readingLight("后左阅读灯", true), () -> vc.readingLight("后左阅读灯", false));
+        pairTile("read_rr", "后右阅读灯", () -> vc.readingLight("后右阅读灯", true), () -> vc.readingLight("后右阅读灯", false));
 
         // 车窗（点击开滑杆）
         group("🪟 车窗");
@@ -232,25 +248,18 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
                     .setListener(press(this::openWindowSlider));
         }
 
-        // 儿童锁
+        // [FIX-20260928] 儿童锁：开/关合并 + 状态点
         group("👶 儿童锁");
-        action("child_l_on", "左锁开", () -> vc.leftChildLockOn());
-        action("child_l_off", "左锁关", () -> vc.leftChildLockOff());
-        action("child_r_on", "右锁开", () -> vc.rightChildLockOn());
-        action("child_r_off", "右锁关", () -> vc.rightChildLockOff());
+        pairTile("child_l", "左童锁", vc::leftChildLockOn, vc::leftChildLockOff);
+        pairTile("child_r", "右童锁", vc::rightChildLockOn, vc::rightChildLockOff);
 
-        // 灯光
+        // [FIX-20260928] 灯光：开/关合并 + 状态点（绿=已开 红=已关）
         group("💡 灯光");
-        action("low_on", "近光开", () -> vc.lowBeamOn());
-        action("low_off", "近光关", () -> vc.lowBeamOff());
-        action("high_on", "远光开", () -> vc.highBeamOn());
-        action("high_off", "远光关", () -> vc.highBeamOff());
-        action("pos_on", "示廓开", () -> vc.positionLightOn());
-        action("pos_off", "示廓关", () -> vc.positionLightOff());
-        action("ffog_on", "前雾开", () -> vc.frontFogOn());
-        action("ffog_off", "前雾关", () -> vc.frontFogOff());
-        action("fog_on", "后雾开", () -> vc.fogLightOn());
-        action("fog_off", "后雾关", () -> vc.fogLightOff());
+        pairTile("low", "近光", vc::lowBeamOn, vc::lowBeamOff);
+        pairTile("high", "远光", vc::highBeamOn, vc::highBeamOff);
+        pairTile("pos", "示廓灯", vc::positionLightOn, vc::positionLightOff);
+        pairTile("ffog", "前雾灯", vc::frontFogOn, vc::frontFogOff);
+        pairTile("fog", "后雾灯", vc::fogLightOn, vc::fogLightOff);
         actionRun("auto", "自动灯光", vc::autoLights);
         actionRun("closeall", "关闭全部", vc::closeAllLights);
 
@@ -269,18 +278,16 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         actionRun("scene_save", "⚠省电模式", () -> vc.scene("POWER_SAVE_MODE"));
         actionRun("scene_guard", "⚠守护模式", () -> vc.scene("GUARD_MODE"));
         actionRun("scene_senti", "⚠哨兵(广播)", () -> vc.scene("SENTINEL_MODE"));
-        actionRun("scene_ped", "⚠行人警示音", () -> vc.scene("PEDESTRIANS_ALERT"));
-        actionRun("mirror_fold", "⚠后视镜折叠",
-                () -> vc.shellSetProp("leap.vehicle.mirror_fold", "1"));
+        // [FIX-20260928] 行人警示音 / 后视镜折叠：合并开/关 + 状态点；通道改 handMessage 语音家族
+        pairTile("ped_pair", "行人警示音", () -> vc.pedestrianAlert(true), () -> vc.pedestrianAlert(false));
+        pairTile("mirror_fold", "后视镜折叠", () -> vc.mirrorFold(true), () -> vc.mirrorFold(false));
         actionRun("force_charge", "⚠强制充电",
                 () -> vc.shellSetProp("leap.energy.force_charge", "1"));
 
-        // 车身 / 工具
+        // [FIX-20260928] 后备箱/车门锁：开/关合并 + 状态点（门盖快照回写）
         group("🧰 车身 / 工具");
-        action("trunk_open", "后备箱开", () -> vc.openTrunk());
-        action("trunk_close", "后备箱关", () -> vc.closeTrunk());
-        action("lock", "🔒 锁车", () -> vc.lockCar());
-        action("unlock", "🔓 解锁", () -> vc.unlockCar());
+        pairTile("trunk_pair", "后备箱", vc::openTrunk, vc::closeTrunk);
+        pairTile("lock_pair", "车门锁", vc::lockCar, vc::unlockCar);
         actionRun("scan", "📱 扫码测控", this::showWebInfoDialog);
         actionRun("diag", "🩺 一键诊断", this::runDiagnostic);
         actionRun("log", "📋 导出日志", this::exportLogs);
@@ -326,9 +333,45 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         });
     }
 
-    private void domeActions(String id, String label, String opcode) {
-        action(id + "_on", label + " 开", () -> vc.domeLight(opcode, true));
-        action(id + "_off", label + " 关", () -> vc.domeLight(opcode, false));
+    // [FIX-20260928] 开关合并：单按钮 + 红/绿/白小点（绿=已开 红=已关 白=未知）；点击翻转
+    private void pairTile(String id, String label, Callable<Boolean> onTask, Callable<Boolean> offTask) {
+        tile(id, TileView.Type.ACTION, pairLabel(id, label), 1, 1)
+                .setListener(press(() -> {
+                    boolean next = !Boolean.TRUE.equals(pairState.get(id));
+                    pairState.put(id, next);
+                    t(id).setLabel(pairLabel(id, label));
+                    runCommand(label + (next ? "开" : "关"), () -> next ? onTask.call() : offTask.call());
+                }));
+    }
+
+    private String pairLabel(String id, String label) {
+        Boolean st = pairState.get(id);
+        String dot = st == null ? "⚪" : (st ? "🟢" : "🔴");
+        return dot + " " + label;
+    }
+
+    /** 有实证状态键时用快照回写小点（覆盖本地乐观态） */
+    private void overlayPair(String id, String label, int v) {
+        if (v < 0) return;   // 无值时保留本地/未知态
+        pairState.put(id, v == 1);
+        t(id).setLabel(pairLabel(id, label));
+    }
+
+    // [FIX-20260928] 内外循环三态轮转（外→内→自动），补齐缺失的自动模式
+    private void innerLoopTile() {
+        tile("innerloop", TileView.Type.ACTION, loopWord(innerLoopMode), 1, 1)
+                .setListener(press(this::innerLoopNext));
+    }
+
+    private void innerLoopNext() {
+        int next = (innerLoopMode + 1) % 3;
+        runCommand(loopWord(next), () -> vc.setAirInnerLoopMode(next));
+        innerLoopMode = next;
+        t("innerloop").setLabel(loopWord(innerLoopMode));
+    }
+
+    private static String loopWord(int m) {
+        return "循环·" + (m == 0 ? "外" : m == 1 ? "内" : "自动");
     }
 
     private TileView tile(String id, TileView.Type type, String label, int sx, int sy) {
@@ -445,7 +488,7 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         switch (i) {
             case 0: hvacToggle("ac", true); break;
             case 1: hvacToggle("front", true); break;
-            case 2: hvacToggle("inner", true); break;
+            case 2: innerLoopNext(); break;
             case 3: runCommand("360全景", () -> vc.open360View()); break;
             case 4: runCommand("后备箱开", () -> vc.openTrunk()); break;
             case 5: runCommand("车门闭锁", () -> vc.lockCar()); break;
@@ -463,7 +506,7 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         switch (key) {
             case "ac":     hvacToggle("ac", c); break;
             case "max":    hvacToggle("max", c); break;
-            case "inner":  hvacToggle("inner", c); break;
+            case "inner":  innerLoopNext(); break;
             case "front":  hvacToggle("front", c); break;
             case "rear":   hvacToggle("rear", c); break;
             case "mirror": runCommand(c ? "后视镜加热开" : "后视镜加热关",
@@ -650,13 +693,13 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         setTire("tire_rl", s, 2);
         setTire("tire_rr", s, 3);
 
-        // 车门 / 舱盖
-        setDoor("door_fl", s.doorStates, 0);
-        setDoor("door_fr", s.doorStates, 1);
-        setDoor("door_rl", s.doorStates, 2);
-        setDoor("door_rr", s.doorStates, 3);
-        setDoor("trunk_state", s.doorStates, 4);
-        setDoor("hood", s.doorStates, 5);
+        // 车门 / 舱盖（[FIX-20260928] 记住最近有效值，不再回退“未读取到”）
+        setDoorCached("door_fl", s.doorStates, 0);
+        setDoorCached("door_fr", s.doorStates, 1);
+        setDoorCached("door_rl", s.doorStates, 2);
+        setDoorCached("door_rr", s.doorStates, 3);
+        setDoorCached("trunk_state", s.doorStates, 4);
+        setDoorCached("hood", s.doorStates, 5);
 
         // 空调滑块 + 开关
         if (s.driverTempHalf >= 0)
@@ -665,13 +708,22 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
             setSliderTile("temp_pass", 16, 32, Math.round(s.passengerTempHalf / 2f), "℃");
         setSliderTile("fan", 1, 7, s.fanSpeed, "档");
         setToggle("ac", s.acSwitch);
-        setToggle("innerloop", s.innerCycle);
+        // [FIX-20260928] 循环三态：有值时同步轮转起点与标签
+        if (s.innerCycle >= 0) {
+            innerLoopMode = Math.min(2, s.innerCycle);
+            t("innerloop").setLabel(loopWord(innerLoopMode));
+        }
         setToggle("frontdef", s.frontDefrost);
         setToggle("reardef", s.rearDefrost);
         setToggle("mirrorheat", s.mirrorHeat);
         setToggle("winlock", s.windowForbit);
         setToggle("sentinel", extraInt(s, "strCarSentinelMode"));
         setToggle("speechspeak", extraInt(s, "SPEECH_SPEAK"));
+        // [FIX-20260928] 合并开关的小点以实证状态为准（有值才覆盖）
+        overlayPair("lock_pair", "车门锁", s.vehicleLock);
+        overlayPair("trunk_pair", "后备箱", s.doorStates != null ? s.doorStates[4] : -1);
+        overlayPair("child_l", "左童锁", s.childLock);
+        overlayPair("child_r", "右童锁", s.childLock);
 
         // 额外 settings 原始状态
         setRawTile("bt", s.extra.get("strCarBluetoothStatus"));
@@ -736,9 +788,13 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         }
     }
 
-    private void setDoor(String id, int[] states, int i) {
-        if (states == null || i >= states.length || states[i] < 0) t(id).setFailed();
-        else t(id).setValue(doorWord(states[i]), "");
+    private void setDoorCached(String id, int[] states, int i) {
+        // [FIX-20260928] 门/舱盖状态记忆：logcat 无新事件时保留最近有效值（标“缓”）
+        int v = (states != null && i < states.length) ? states[i] : -1;
+        if (v >= 0) lastDoor[i] = v;
+        int show = v >= 0 ? v : lastDoor[i];
+        if (show < 0) t(id).setFailed();
+        else t(id).setValue(doorWord(show), v >= 0 ? "" : "缓");
     }
 
     private static String doorWord(int st) {
@@ -772,6 +828,9 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
     // ═══════════════════════════════════════════════
 
     private void enterImmersive() {
+        // [FIX-20260928] 全屏：补 FLAG_FULLSCREEN 窗口标志（仅系统 UI 标志时部分车机仍留状态栏）
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                WindowManager.LayoutParams.FLAG_FULLSCREEN);
         getWindow().getDecorView().setSystemUiVisibility(
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                         | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION

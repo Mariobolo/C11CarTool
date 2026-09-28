@@ -19,23 +19,22 @@ import java.util.Locale;
 public final class CrashHandler implements Thread.UncaughtExceptionHandler {
 
     private static final String TAG = "CrashHandler";
-    // [FIX] 不再硬编码 /sdcard，使用 App 私有外部目录（兼容 Android 10+ 分区存储）
+    // [FIX] 不再硬编码 /sdcard，崩溃日志与日志系统同目录（下载目录/软件同名目录）
     private static String crashDir() {
         java.io.File dir = new java.io.File(Sh.exportDir(), "crash_logs");
         if (!dir.exists()) dir.mkdirs();
         return dir.getAbsolutePath();
     }
 
-    private final Context context;
     private final Thread.UncaughtExceptionHandler defaultHandler;
 
-    public CrashHandler(Context context) {
-        this.context = context;
+    private CrashHandler() {
         this.defaultHandler = Thread.getDefaultUncaughtExceptionHandler();
     }
 
     public static void install(Context context) {
-        Thread.setDefaultUncaughtExceptionHandler(new CrashHandler(context));
+        // [FIX] 不再持有 Activity 引用（原 context 字段未使用却导致静态泄漏）
+        Thread.setDefaultUncaughtExceptionHandler(new CrashHandler());
         Logger.info(TAG, "全局异常捕获已安装");
     }
 
@@ -117,9 +116,10 @@ public final class CrashHandler implements Thread.UncaughtExceptionHandler {
             String filename = "crash_" + sdf.format(new Date()) + ".txt";
             File file = new File(dir, filename);
 
-            FileWriter fw = new FileWriter(file);
-            fw.write(crashLog);
-            fw.close();
+            // [FIX] try-with-resources，写失败不泄漏 fd
+            try (FileWriter fw = new FileWriter(file)) {
+                fw.write(crashLog);
+            }
 
             android.util.Log.i(TAG, "崩溃日志已保存: " + file.getAbsolutePath());
         } catch (Exception e) {

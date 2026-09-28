@@ -31,18 +31,22 @@ public final class LogExport {
      */
     public static void saveText(final Context ctx, final String filePrefix,
                                 final String content, final Callback cb) {
+        // [FIX] 文件名前缀白名单化，杜绝路径穿越；content 判空
+        final String safePrefix = (filePrefix == null || filePrefix.isEmpty())
+                ? "log" : filePrefix.replaceAll("[^A-Za-z0-9_\\-]", "_");
+        final String safeContent = content == null ? "" : content;
         Sh.submitAsync(new Runnable() {
             @Override public void run() {
                 String path = null;
                 boolean ok = false;
                 try {
                     File dir = Sh.exportDir();
-                    String fn = filePrefix + "_" + new SimpleDateFormat(
+                    String fn = safePrefix + "_" + new SimpleDateFormat(
                             "yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date()) + ".txt";
                     File f = new File(dir, fn);
                     FileOutputStream fos = new FileOutputStream(f);
                     try {
-                        fos.write(content.getBytes("UTF-8"));
+                        fos.write(safeContent.getBytes("UTF-8"));
                     } finally {
                         fos.close();
                     }
@@ -55,7 +59,7 @@ public final class LogExport {
                 final String p = path;
                 final boolean o = ok;
                 new Handler(Looper.getMainLooper()).post(new Runnable() {
-                    @Override public void run() { cb.onDone(p, o); }
+                    @Override public void run() { if (cb != null) cb.onDone(p, o); }
                 });
             }
         });

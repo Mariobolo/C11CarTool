@@ -39,6 +39,9 @@ public class DashboardRepository {
     private final android.os.Handler mainHandler;
     private Thread thread;
     private volatile boolean running = false;
+    // [FIX-20260927] 刷新触发改标志位+wait/notify（替代 interrupt，避免打断进行中的 ADB 流）
+    private final Object wakeLock = new Object();
+    private volatile boolean refreshNow = false;
 
     public DashboardRepository(android.os.Handler main, Callback cb) {
         this.mainHandler = main;
@@ -59,10 +62,17 @@ public class DashboardRepository {
     public synchronized void stop() {
         running = false;
         if (thread != null) { thread.interrupt(); thread = null; }
+        synchronized (wakeLock) { wakeLock.notifyAll(); }
     }
 
+    // [FIX-20260927] 原实现用 thread.interrupt() 触发立即采集，但中断会打断进行中的
+    // Sh.run/AdbClient 命令流（内部也有 sleep），造成输出错位/被吞，数据"时好时坏"；
+    // 且外层 catch 会再补一轮采集形成双跑。改为标志位唤醒，不再中断采集线程。
     public void requestRefresh() {
-        if (thread != null) thread.interrupt();
+        synchronized (wakeLock) {
+            refreshNow = true;
+            wakeLock.notifyAll();
+        }
     }
 
     private void loop() {
@@ -72,17 +82,19 @@ public class DashboardRepository {
                 collectOnce();
                 long cost = System.currentTimeMillis() - t0;
                 long sleep = INTERVAL_MS - cost;
-                if (sleep > 0) Thread.sleep(sleep);
-            } catch (InterruptedException e) {
-                // 收到中断 = 触发一次立即采集（车控后主动刷新）
-                if (running) {
-                    try { collectOnce(); } catch (Exception ignored) {}
+                synchronized (wakeLock) {
+                    if (refreshNow) { refreshNow = false; continue; }  // 车控后立即补采一轮
+                    if (sleep > 0 && running) wakeLock.wait(sleep);
                 }
+            } catch (InterruptedException e) {
+                // 仅 stop() 会中断；直接退出，不再借中断触发采集
+                break;
             } catch (Exception e) {
                 Logger.warn(TAG, "采集异常: " + e.getMessage());
-                try { Thread.sleep(INTERVAL_MS); } catch (InterruptedException ignored) {}
+                try { Thread.sleep(INTERVAL_MS); } catch (InterruptedException ignored) { break; }
             }
         }
+        Logger.info(TAG, "仪表盘数据采集线程退出");
     }
 
     private void collectOnce() {
@@ -101,6 +113,11 @@ public class DashboardRepository {
         // ── settings list global：一次命令，Java 端解析 �─
         java.util.ArrayList<SignalRow> settingsRows = new java.util.ArrayList<SignalRow>();
         Sh.Result s = Sh.run("settings list global", 10000);
+        // [FIX-20260927] 瞬时失败（ADB 抖动/超时）隔 500ms 补读一次，减少整轮空数据
+        if (!(s.ok() && s.out != null)) {
+            try { Thread.sleep(500); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            s = Sh.run("settings list global", 10000);
+        }
         if (s.ok() && s.out != null) {
             parseSettings(s.out, snap, settingsRows);
             snap.settingsOk = true;

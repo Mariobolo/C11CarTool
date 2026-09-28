@@ -151,23 +151,43 @@ public final class CarControlExperiment {
         return steps;
     }
 
+    /** 可取消句柄：调用方在页面销毁/用户中止时 cancel()，实验线程尽快收尾并回调 onFinished */
+    public static final class RunHandle {
+        private volatile boolean cancelled = false;
+        private volatile Thread thread;
+        public void cancel() {
+            cancelled = true;
+            Thread t = thread;
+            if (t != null) t.interrupt();
+        }
+        public boolean isCancelled() { return cancelled; }
+    }
+
     /**
      * 在后台线程顺序执行全部步骤。
      * 每个步骤先请求确认，确认后执行、间隔等待、主动判定，再进入下一步。
+     * 无论正常结束/取消/中断，最终都会回调 {@link Callback#onFinished}。
      */
-    public static void runAsync(List<Step> steps, Callback cb) {
-        Thread t = new Thread(() -> run(steps, cb), "CarCtrlExperiment");
+    public static RunHandle runAsync(List<Step> steps, Callback cb) {
+        RunHandle handle = new RunHandle();
+        Thread t = new Thread(() -> run(steps, cb, handle), "CarCtrlExperiment");
         t.setDaemon(true);
+        handle.thread = t;
         t.start();
+        return handle;
     }
 
-    private static void run(List<Step> steps, Callback cb) {
+    private static void run(List<Step> steps, Callback cb, RunHandle handle) {
         StringBuilder summary = new StringBuilder();
         summary.append("=== 车控顺序实验结果 ===\n");
         int ok = 0, fail = 0, observe = 0, skip = 0, blocked = 0;
-
+        try {
         for (int i = 0; i < steps.size(); i++) {
             Step step = steps.get(i);
+            if (handle.isCancelled()) {
+                summary.append("⛔ 已取消，剩余步骤未执行\n");
+                break;
+            }
             String prefix = "[" + (i + 1) + "/" + steps.size() + "] ";
             cb.onProgress(prefix + "等待确认: " + step.title);
 
@@ -190,11 +210,14 @@ public final class CarControlExperiment {
             try {
                 if (!latch.await(5, java.util.concurrent.TimeUnit.MINUTES)) {
                     cb.onStepResult(step, StepResult.SKIPPED, "确认超时（5分钟）");
+                    summary.append("⏭️ ").append(step.title).append(" — 确认超时（5分钟）\n");
+                    skip++;
                     continue;
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                return;
+                summary.append("⛔ ").append(step.title).append(" — 被中断，停止实验\n");
+                return;   // finally 仍会回调 onFinished
             }
             if (holder.skip) {
                 cb.onStepResult(step, StepResult.SKIPPED, "用户跳过");
@@ -211,7 +234,11 @@ public final class CarControlExperiment {
                 step.executor.run();
                 // 等待 3-5 秒，让车机处理完成（同时满足开关先后逻辑）
                 cb.onProgress(prefix + "等待车机响应 " + (STEP_INTERVAL_MS / 1000) + "s ...");
-                try { Thread.sleep(STEP_INTERVAL_MS); } catch (InterruptedException e) { return; }
+                try { Thread.sleep(STEP_INTERVAL_MS); } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    summary.append("⛔ ").append(step.title).append(" — 被中断，停止实验\n");
+                    return;   // finally 仍会回调 onFinished
+                }
 
                 // 主动判定：有验证器则查询，无则需人工观察
                 if (step.verifier != null) {
@@ -236,13 +263,15 @@ public final class CarControlExperiment {
                 default: break;
             }
         }
-
-        summary.append("\n=== 汇总: 成功 ").append(ok)
-               .append(" | 失败 ").append(fail)
-               .append(" | 待人工确认 ").append(observe)
-               .append(" | 跳过 ").append(skip)
-               .append(" | 阻断 ").append(blocked).append(" ===\n");
-        cb.onFinished(summary.toString());
+        } finally {
+            // [FIX] 无论正常结束/取消/中断，统一收尾回调，调用方 UI 不会永远“进行中”
+            summary.append("\n=== 汇总: 成功 ").append(ok)
+                   .append(" | 失败 ").append(fail)
+                   .append(" | 待人工确认 ").append(observe)
+                   .append(" | 跳过 ").append(skip)
+                   .append(" | 阻断 ").append(blocked).append(" ===\n");
+            cb.onFinished(summary.toString());
+        }
     }
 
     /** 简单确认信号量（等待 UI 线程返回用户选择） */

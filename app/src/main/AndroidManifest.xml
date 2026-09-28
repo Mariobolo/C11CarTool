@@ -43,7 +43,7 @@
         <!-- 工程模式：一键全测/诊断/车控实验/25 类参数浏览（从仪表盘右上角进入） -->
         <activity
             android:name=".MainActivity"
-            android:exported="true"
+            android:exported="false"
             android:label="C11 车控 · 工程模式"
             android:screenOrientation="landscape"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar"

@@ -1,11 +1,14 @@
 package com.c11.cartool;
 
+import android.app.AlarmManager;
+import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Log;
 
 /**
@@ -40,6 +43,18 @@ public class BootReceiver extends BroadcastReceiver {
     /** 延迟时间设置 key */
     public static final String KEY_BOOT_DELAY_MS = "boot_delay_ms";
 
+    /** 延迟启动 Demo 的 action（AlarmManager 精确调度，进程被杀也能触发） */
+    public static final String ACTION_START_DEMO = "com.c11.cartool.action.START_DEMO";
+
+    /** 重试轮次 extra */
+    public static final String EXTRA_RETRY = "retry";
+
+    /** 启动失败后的最大重试轮次 */
+    private static final int MAX_START_RETRY = 2;
+
+    /** 重试间隔（毫秒） */
+    private static final long RETRY_DELAY_MS = 15000;
+
     @Override
     public void onReceive(Context context, Intent intent) {
         if (intent == null || intent.getAction() == null) {
@@ -51,6 +66,13 @@ public class BootReceiver extends BroadcastReceiver {
 
         if (Intent.ACTION_BOOT_COMPLETED.equals(action)) {
             handleBootCompleted(context);
+        } else if (ACTION_START_DEMO.equals(action)) {
+            // [FIX] 延迟任务真正落地点；启动失败自动重试，不再一失永失
+            int retry = intent.getIntExtra(EXTRA_RETRY, 0);
+            if (!startDemoActivity(context) && retry < MAX_START_RETRY) {
+                Log.w(TAG, "startDemoActivity 失败，安排重试 " + (retry + 1));
+                scheduleStartDemo(context, RETRY_DELAY_MS, retry + 1);
+            }
         }
     }
 
@@ -58,6 +80,9 @@ public class BootReceiver extends BroadcastReceiver {
      * 处理开机完成广播
      */
     private void handleBootCompleted(Context context) {
+        // 开机即开始日志落盘（下载目录/软件同名目录，logcat + 软件日志，始终存储）
+        LogStore.init(context.getApplicationContext());
+
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
 
         // 检查用户是否开启了开机自动开启 WiFi ADB
@@ -71,22 +96,40 @@ public class BootReceiver extends BroadcastReceiver {
         long delayMs = prefs.getLong(KEY_BOOT_DELAY_MS, DEFAULT_BOOT_DELAY_MS);
         Log.i(TAG, "Auto start ADB WiFi enabled, delay " + delayMs + "ms");
 
-        // 延迟启动 DemoActivity
-        Handler handler = new Handler(Looper.getMainLooper());
-        handler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                startDemoActivity(context);
+        // [FIX] 用 AlarmManager 精确定时（进程被回收也能触发）；postDelayed 在 receiver 里不可靠
+        scheduleStartDemo(context, delayMs, 0);
+    }
+
+    /**
+     * 安排一次 DemoActivity 启动（AlarmManager 精确闹钟；不可用时退化为 Handler）
+     */
+    private static void scheduleStartDemo(Context context, long delayMs, int retry) {
+        try {
+            AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+            Intent i = new Intent(context, BootReceiver.class);
+            i.setAction(ACTION_START_DEMO);
+            i.putExtra(EXTRA_RETRY, retry);
+            PendingIntent pi = PendingIntent.getBroadcast(context, 1001 + retry, i,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            if (am != null) {
+                am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                        SystemClock.elapsedRealtime() + delayMs, pi);
+                return;
             }
-        }, delayMs);
+        } catch (Exception e) {
+            Log.e(TAG, "scheduleStartDemo error: " + e.getMessage());
+        }
+        // 兜底路径：仅当进程存活时生效（劣于 AlarmManager，聊胜于无）
+        new Handler(Looper.getMainLooper()).postDelayed(() -> startDemoActivity(context), delayMs);
     }
 
     /**
      * 启动零跑系统 Demo Activity
      *
      * 启动后，AdbWifiAccessibilityService 会自动检测窗口并点击 "turn on adb wifi" 按钮
+     * @return true 表示启动命令已发出
      */
-    public static void startDemoActivity(Context context) {
+    public static boolean startDemoActivity(Context context) {
         try {
             Intent intent = new Intent();
             intent.setClassName("com.leapmotor.system", "com.leapmotor.system.demo.DemoActivity");
@@ -94,9 +137,11 @@ public class BootReceiver extends BroadcastReceiver {
             intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
             context.startActivity(intent);
             Log.i(TAG, "Started DemoActivity: com.leapmotor.system.demo.DemoActivity");
+            return true;
         } catch (Exception e) {
             Log.e(TAG, "Failed to start DemoActivity: " + e.getMessage());
             e.printStackTrace();
+            return false;
         }
     }
 
@@ -117,7 +162,11 @@ public class BootReceiver extends BroadcastReceiver {
             }
 
             String expectedService = context.getPackageName() + "/" + AdbWifiAccessibilityService.class.getName();
-            return enabledServices.contains(expectedService);
+            // [FIX] 精确比较（按 : 分割），避免 contains 前缀误判
+            for (String s : enabledServices.split(":")) {
+                if (expectedService.equals(s.trim())) return true;
+            }
+            return false;
         } catch (Exception e) {
             Log.e(TAG, "isAccessibilityServiceEnabled error: " + e.getMessage());
             return false;

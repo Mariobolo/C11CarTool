@@ -30,11 +30,9 @@ android {
         targetCompatibility JavaVersion.VERSION_1_8
     }
 
-    // 不使用 AndroidX (兼容车机 Android 9)
     useLibrary 'android.test.base'
     useLibrary 'android.test.mock'
 }
 
 dependencies {
-    // 无外部依赖，纯 Android SDK
 }

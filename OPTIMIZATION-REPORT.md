@@ -125,7 +125,7 @@ VehicleControl.speak("hello\"; rm -rf /sdcard; echo \"");
 
 ### P7: QrCode.java 815 行 ⚠️
 **风险**：纯 Java QR 码生成器，性能好但代码量大
-**建议**：可考虑精简或换用轻量库（但当前无依赖策略下保留）
+**建议**：可考虑精简或换用轻量库
 
 ---
 

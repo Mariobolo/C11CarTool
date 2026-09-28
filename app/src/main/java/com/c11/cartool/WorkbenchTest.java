@@ -244,35 +244,39 @@ public final class WorkbenchTest {
         for (int i = 0; i < actions.size(); i++) {
             Action a = actions.get(i);
             cb.onProgress("阶段3/5：车控 " + (i + 1) + "/" + actions.size() + " " + a.title);
-            Sh.Result before = VehicleController.lastResult();
+            Sh.Result before = VehicleController.lastResultOfThread();
             boolean ret = false;
             Exception ex = null;
             try { ret = a.task.run(); } catch (Exception e) { ex = e; }
-            Sh.Result r = VehicleController.lastResult();
+            Sh.Result r = VehicleController.lastResultOfThread();
             if (r == before || r == null) r = before;
             String verdict;
             String detail;
             String out = r == null || r.out == null ? "" : r.out.trim();
             String err = r == null || r.err == null ? "" : r.err.trim();
+            String both = out + " " + err;   // 权限异常常在 stderr，合并判定
             if (ex != null) {
                 verdict = "❌ 失败"; fail++;
                 detail = "异常: " + ex;
-            } else if (containsAny(out, "Security exception", "INTERACT_ACROSS_USERS",
+            } else if (containsAny(both, "Security exception", "INTERACT_ACROSS_USERS",
                     "Permission Denial", "requires ", "not allowed")) {
                 verdict = "❌ 失败"; fail++;
                 detail = "权限/跨用户拒绝";
-            } else if (containsAny(out, "not found", "Unable to resolve", "does not exist",
+            } else if (containsAny(both, "not found", "Unable to resolve", "does not exist",
                     "Error: didn't")) {
                 verdict = "❌ 失败"; fail++;
                 detail = "组件/服务不存在";
-            } else if (r != null && r.exit == 0
+            } else if (r != null && r.ok()
                     && (out.contains("Broadcast completed") || out.contains("Starting service")
                         || out.contains("Service started") || out.isEmpty())) {
                 verdict = "⚠️ 已投递·待目视"; observe++;
                 detail = out.isEmpty() ? "(无回显)" : firstLine(out);
-            } else if (r != null && r.exit == 0) {
+            } else if (r != null && r.ok()) {
                 verdict = "⚠️ 已投递·待目视"; observe++;
                 detail = firstLine(out);
+            } else if (r == null && ret) {
+                verdict = "⚠️ 已投递·待目视"; observe++;
+                detail = "(Intent 通道无 shell 回显，请目视确认)";
             } else {
                 verdict = "❌ 失败"; fail++;
                 detail = "exit=" + (r == null ? "?" : r.exit) + " " + firstLine(err + " " + out);
@@ -295,13 +299,21 @@ public final class WorkbenchTest {
             {"后除霜ON",     "strCarRearDefrost", "1"},
             {"内循环ON",     "strCarAirInner", "1"},
         };
+        java.util.LinkedHashMap<String, String> original = new java.util.LinkedHashMap<>();
+        try {
         for (String[] t : setTests) {
             String title = t[0], key = t[1], val = t[2];
+            // [FIX] 先读原值，测试后全量恢复（含异常路径），避免把空调/风量/内循环留在车上
+            Sh.Result oldR = Sh.run("settings get global " + key, 6000);
+            String oldVal = oldR == null || oldR.out == null ? "" : oldR.out.trim();
+            if ("null".equals(oldVal)) oldVal = "";
+            original.put(key, oldVal);
             Sh.Result pw = Sh.run("settings put global " + key + " " + val, 8000);
             sleep(1300);
             Sh.Result pg = Sh.run("settings get global " + key, 6000);
             String rb = pg == null || pg.out == null ? "" : pg.out.trim();
-            boolean match = pw != null && pw.exit == 0 && rb.equals(val);
+            // [FIX-20260927] 用 ok()（含 timeout 判定）替代裸 exit==0，超时不再被当成功
+            boolean match = pw != null && pw.ok() && rb.equals(val);
             rep.append("  ").append(pad(match ? "✅ 回读一致" : "❌ 未生效", 16))
                .append(pad(title, 16)).append("[settings ").append(key).append("] ")
                .append("写入=").append(val).append(" 回读=").append(rb);
@@ -310,10 +322,19 @@ public final class WorkbenchTest {
             if (match) ok++; else fail++;
             sleep(ACTION_INTERVAL_MS);
         }
-        // 收尾：关闭前后除霜与空调界面，避免测试后持续除霜/停留在空调页
-        Sh.run("settings put global strCarFrontDefrost 0", 8000); sleep(800);
-        Sh.run("settings put global strCarRearDefrost 0", 8000); sleep(800);
-        Sh.run("settings put global strCar100006 0", 8000); sleep(500);
+        // 收尾：全量恢复 setTests 写过的键（含异常路径），避免测试后空调/除霜/内循环残留
+        } finally {
+            for (java.util.Map.Entry<String, String> e : original.entrySet()) {
+                String v = e.getValue();
+                // 原值为空 → 键原本不存在，用 delete 还原；否则写回原值
+                Sh.run(v.isEmpty()
+                                ? "settings delete global " + e.getKey()
+                                : "settings put global " + e.getKey() + " " + v,
+                        8000);
+                sleep(300);
+            }
+            Sh.run("settings put global strCar100006 0", 8000); sleep(500);
+        }
 
         rep.append("\n  小计：✅确认 ").append(ok).append("，⚠️已投递待目视 ").append(observe)
            .append("，❌失败 ").append(fail).append("\n\n");
@@ -549,6 +570,6 @@ public final class WorkbenchTest {
     }
 
     private static void sleep(long ms) {
-        try { Thread.sleep(ms); } catch (InterruptedException ignored) {}
+        try { Thread.sleep(ms); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
     }
 }

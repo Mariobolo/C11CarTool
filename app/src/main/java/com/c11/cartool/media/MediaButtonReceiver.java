@@ -9,7 +9,8 @@ import android.view.KeyEvent;
  * 标准媒体按键接收器：把方向盘 / 蓝牙的 {@code MEDIA_BUTTON} 转发给当前播放器控制器。
  * 在 Manifest 注册（action {@code android.intent.action.MEDIA_BUTTON}）。
  *
- * <p>仅在 App 前台、已注入 {@link MediaHub} 时转发；零跑方控是否走标准媒体路由需真机验证。
+ * <p>⚠️ 当前 {@link #setActiveHub} 尚无调用方（链路未接通），转发不会发生；
+ * 接线时需补前台/来源校验（exported receiver 可被第三方 App 伪造按键）。
  */
 public class MediaButtonReceiver extends BroadcastReceiver {
 

@@ -19,7 +19,7 @@ public class DashboardSnapshot {
     // ── settings global 真机键（开关/温度/风量等状态量） ──
     public volatile int  acSwitch    = -1;   // strCarAirSwitch 0关1开
     public volatile int  fanSpeed    = -1;   // strCarAirWind 0-7
-    public volatile int  innerCycle  = -1;   // strCarAirInner 0外1内(待标定)
+    public volatile int  innerCycle  = -1;   // strCarAirInner 0外1内2自动
     public volatile int  frontDefrost = -1;  // strCarFrontDefrost
     public volatile int  rearDefrost  = -1;  // strCarRearDefrost
     public volatile int  driverTempHalf  = -1; // strCar1409 值/2=℃

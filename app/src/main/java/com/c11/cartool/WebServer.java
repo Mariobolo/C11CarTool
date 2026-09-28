@@ -393,7 +393,8 @@ public class WebServer {
 
         boolean first = true;
         for (String[] kv : keys) {
-            Sh.Result r = Sh.run("settings get global " + kv[0]);
+            // [FIX-20260927] 走 getWithResult（内置瞬时失败重试），缓解 Web 端数据"时好时坏"
+            Sh.Result r = VehicleControl.getWithResult(kv[0], "setting");
             String val = r.out != null ? r.out.trim() : "";
             if (!first) sb.append(",");
             sb.append("\"").append(kv[1]).append("\":\"").append(escapeJson(val)).append("\"");

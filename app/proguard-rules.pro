@@ -1,5 +1,5 @@
 # C11CarTool ProGuard/R8 rules
-# 项目无外部依赖，主要保护反射/序列化用到的类
+# 保护反射/序列化用到的类
 
 # Keep VehicleDataModel (volatile fields, JSON serialization)
 -keep class com.c11.cartool.vehicle.VehicleDataModel { *; }

@@ -58,7 +58,9 @@ public class AmapFixActivity extends Activity {
     private TextView diagView;
     private TextView logView;
     private ScrollView logScroll;
-    private boolean running = false;
+    // [FIX] 跨线程防连点标志：AtomicBoolean 保证可见性与原子性
+    private final java.util.concurrent.atomic.AtomicBoolean running =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -66,6 +68,13 @@ public class AmapFixActivity extends Activity {
         h = new Handler(Looper.getMainLooper());
         setContentView(buildUI());
         Sh.submitAsync(this::runDiagnosis);
+    }
+
+    @Override
+    protected void onDestroy() {
+        // [FIX] 清理滞留回调，避免页面退出后弹框/更新 View
+        if (h != null) h.removeCallbacksAndMessages(null);
+        super.onDestroy();
     }
 
     private View buildUI() {
@@ -121,7 +130,7 @@ public class AmapFixActivity extends Activity {
         content.addView(makeBtn("🔄 重新诊断", C_BLUE,
                 v -> Sh.submitAsync(this::runDiagnosis)));
         content.addView(makeBtn("✅ 一键修复（推送配置+授权+清数据+重启）", C_GREEN,
-                v -> { if (!running) { running = true; Sh.submitAsync(this::runOneClickFix); } }));
+                v -> { if (running.compareAndSet(false, true)) Sh.submitAsync(this::runOneClickFix); }));
         content.addView(makeBtn("📄 仅推送 vsomeip.json 配置", C_CYAN,
                 v -> Sh.submitAsync(this::deployConfig)));
         content.addView(makeBtn("🔑 仅授予定位权限", C_YELLOW,
@@ -253,7 +262,7 @@ public class AmapFixActivity extends Activity {
         } catch (Exception e) {
             log("❌ 修复异常: " + e.getMessage());
         } finally {
-            running = false;
+            running.set(false);
         }
     }
 
@@ -329,13 +338,17 @@ public class AmapFixActivity extends Activity {
         log("开始抓取日志(10秒)...");
         log("请在此期间操作高德地图尝试定位...");
         try {
-            Sh.run("logcat -c");
+            // [FIX] 不再 logcat -c 清空全系统日志缓冲，改用时间窗增量截取
+            String t0 = new SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US).format(new Date());
             Thread.sleep(10000);
-            Sh.Result r = Sh.run("logcat -d -t 800 | grep -iE 'vsomeip|someip|multicast|location|gnss|gps|gaode|autonavi|avc.*denied'");
-            String result = r.out;
+            Sh.Result r = Sh.run("logcat -d -v threadtime -T '" + t0
+                    + "' | grep -iE 'vsomeip|someip|multicast|location|gnss|gps|gaode|autonavi|avc.*denied'");
+            String result = r.out == null ? "" : r.out;
             if (result.length() == 0) result = "（未捕获到相关日志，可能地图未产生相关输出）";
             final String fr = result;
             h.post(() -> {
+                // [FIX] 页面已退出则不再弹框，避免 BadTokenException 崩溃
+                if (isFinishing() || isDestroyed()) return;
                 AlertDialog.Builder b = new AlertDialog.Builder(this);
                 b.setTitle("日志抓取结果 (" + fr.length() + " 字符)");
                 TextView tv = new TextView(this);
@@ -358,17 +371,15 @@ public class AmapFixActivity extends Activity {
     // ==================== 工具 ====================
 
     private String readAsset(String name) {
-        try {
-            InputStream is = getAssets().open(name);
-            BufferedReader br = new BufferedReader(new InputStreamReader(is));
+        // [FIX] try-with-resources，异常路径不再泄漏流
+        try (InputStream is = getAssets().open(name);
+             BufferedReader br = new BufferedReader(new InputStreamReader(is))) {
             StringBuilder sb = new StringBuilder();
             String line;
             while ((line = br.readLine()) != null) {
                 if (sb.length() > 0) sb.append("\n");
                 sb.append(line);
             }
-            br.close();
-            is.close();
             return sb.toString();
         } catch (Exception e) {
             return null;

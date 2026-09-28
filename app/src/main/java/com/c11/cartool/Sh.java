@@ -602,16 +602,11 @@ public final class Sh {
     public static String whoami() { return out("id"); }
 
     /**
-     * 报告/采集文件导出目录：App 私有外部目录（Android/data/包名/files/exports），
-     * 无需存储运行时权限即可直接写，ADB shell 与文件管理器可读。
+     * 报告/采集/日志统一存储目录：下载目录/软件同名目录（如 /sdcard/Download/C11 车控/）。
+     * 与 LogStore 双日志同目录，便于用户在文件管理器一次性找到全部日志。
      */
     public static File exportDir() {
-        File base = null;
-        try { if (appContext != null) base = appContext.getExternalFilesDir(null); } catch (Exception ignored) {}
-        if (base == null) base = new File("/sdcard");
-        File ex = new File(base, "exports");
-        if (!ex.exists()) ex.mkdirs();
-        return ex;
+        return LogStore.logDir();
     }
 
     /**

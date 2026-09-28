@@ -53,13 +53,26 @@ public final class VehicleControl {
             default:        cmd = "getprop " + key; break;
         }
         Sh.Result r = Sh.run(cmd);
+        // [FIX-20260927] 读取瞬时失败重试：ADB 抖动/超时是"时好时坏"主因之一；
+        // 读操作幂等，失败或（非 prop 渠道的）空输出时隔 300ms 补读一次再定论。
+        boolean suspicious = !r.ok()
+                || ((r.out == null || r.out.trim().isEmpty()) && !"prop".equals(ns));
+        if (suspicious) {
+            try { Thread.sleep(300); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            Sh.Result r2 = Sh.run(cmd);
+            if (r2.ok() && r2.out != null && !r2.out.trim().isEmpty()) r = r2;
+        }
         Logger.cmd(cmd, r);
         return r;
     }
 
     // ═══ 写入 Settings.Global ═══
 
-    public static void setSetting(String key, String value, String ns) {
+    /**
+     * 写入 Settings（返回完整 Result，供调用方按成败更新 UI，不再乐观显示）
+     * [FIX-20260927] 返回值由 void 改为 Sh.Result，忽略返回值的旧调用方不受影响
+     */
+    public static Sh.Result setSetting(String key, String value, String ns) {
         key = sanitizeShellArg(key);
         value = sanitizeShellArg(value);
         String cmd;
@@ -70,6 +83,7 @@ public final class VehicleControl {
         }
         Sh.Result r = Sh.run(cmd);
         Logger.cmd(cmd, r);
+        return r;
     }
 
     // ═══ 广播控制 (已确认可用) ═══

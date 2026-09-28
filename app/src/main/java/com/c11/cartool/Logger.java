@@ -177,5 +177,8 @@ public final class Logger {
                 Log.e(TAG, "Logger callback error: " + e.getMessage());
             }
         }
+
+        // 始终落盘：软件日志（下载目录/软件同名目录）
+        LogStore.appendAppLog(line);
     }
 }

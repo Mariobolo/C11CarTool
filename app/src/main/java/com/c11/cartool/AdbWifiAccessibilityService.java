@@ -44,6 +44,11 @@ public class AdbWifiAccessibilityService extends AccessibilityService {
     /** 是否正在执行自动点击（防止重复点击） */
     private boolean isClicking = false;
 
+    /** 点击任务（可去重：新事件到来时先撤掉未执行的旧任务） */
+    private final Runnable clickTask = new Runnable() {
+        @Override public void run() { tryClickAdbWifiButton(); }
+    };
+
     /** 点击超时时间（毫秒） */
     private static final long CLICK_TIMEOUT = 10000;
 
@@ -66,16 +71,17 @@ public class AdbWifiAccessibilityService extends AccessibilityService {
         if (!TARGET_PACKAGE.contentEquals(packageName)) {
             return;
         }
+        // [FIX] 同时校验目标 Activity（原注释声称校验但代码没做）：
+        // com.leapmotor.system 其它窗口不应触发自动点击
+        if (!TARGET_ACTIVITY.contentEquals(className)) {
+            return;
+        }
 
         Log.i(TAG, "Window state changed: " + packageName + "/" + className);
 
-        // 延迟一点等待界面完全加载
-        handler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                tryClickAdbWifiButton();
-            }
-        }, 500);
+        // [FIX] 延迟一点等待界面完全加载；先撤掉未执行的旧任务，避免连环点击
+        handler.removeCallbacks(clickTask);
+        handler.postDelayed(clickTask, 500);
     }
 
     /**
@@ -97,14 +103,15 @@ public class AdbWifiAccessibilityService extends AccessibilityService {
         AccessibilityNodeInfo button = findButtonById(rootNode, BTN_TURN_ON_ADB_WIFI);
 
         if (button == null) {
-            // 如果 resource-id 找不到，尝试通过文本查找
+            // 如果 resource-id 找不到，尝试通过文本查找（完整文案匹配）
             button = findButtonByText(rootNode, "turn on adb wifi");
         }
 
         if (button == null) {
             Log.w(TAG, "Button not found, trying recursive search...");
-            // 最后尝试：递归查找所有可点击的按钮，看文本是否包含 "adb wifi"
-            button = findButtonByTextContains(rootNode, "adb wifi");
+            // 最后尝试：递归查找文本包含完整短语 "turn on adb wifi" 的可点击控件。
+            // [FIX] 严禁宽泛 contains("adb wifi")：会把 "turn off adb wifi" 点掉（反向操作）
+            button = findButtonByTextContains(rootNode, "turn on adb wifi");
         }
 
         if (button != null) {
@@ -121,6 +128,7 @@ public class AdbWifiAccessibilityService extends AccessibilityService {
                     @Override
                     public void run() {
                         Intent intent = new Intent(ACTION_ADB_WIFI_CLICKED);
+                        intent.setPackage(getPackageName());  // [FIX] 显式定向本应用，不发隐式广播
                         intent.putExtra("success", true);
                         sendBroadcast(intent);
                         Log.i(TAG, "Sent completion broadcast");
@@ -144,10 +152,13 @@ public class AdbWifiAccessibilityService extends AccessibilityService {
             return null;
         }
         try {
-            return root.findAccessibilityNodeInfosByViewId(viewId).stream()
-                    .filter(node -> node.isClickable() || node.isEnabled())
-                    .findFirst()
-                    .orElse(null);
+            // [FIX] 只接受可点击节点（原 isEnabled() 对几乎所有节点为真，形同虚设）；
+            // 命中文本节点时向上找可点击祖先
+            for (AccessibilityNodeInfo node : root.findAccessibilityNodeInfosByViewId(viewId)) {
+                AccessibilityNodeInfo click = clickableOf(node);
+                if (click != null) return click;
+            }
+            return null;
         } catch (Exception e) {
             Log.e(TAG, "findButtonById error: " + e.getMessage());
             return null;
@@ -155,17 +166,23 @@ public class AdbWifiAccessibilityService extends AccessibilityService {
     }
 
     /**
-     * 通过精确文本查找节点
+     * 通过完整文本查找节点（大小写不敏感、整句相等，避免子串误命中）
      */
     private AccessibilityNodeInfo findButtonByText(AccessibilityNodeInfo root, String text) {
         if (root == null) {
             return null;
         }
         try {
-            return root.findAccessibilityNodeInfosByText(text).stream()
-                    .filter(node -> node.isClickable() || node.isEnabled())
-                    .findFirst()
-                    .orElse(null);
+            // 注意：findAccessibilityNodeInfosByText 本身是“不区分大小写的包含匹配”，
+            // 这里再校验整句相等才是真正的精确查找
+            for (AccessibilityNodeInfo node : root.findAccessibilityNodeInfosByText(text)) {
+                CharSequence t = node.getText();
+                if (t != null && text.equalsIgnoreCase(t.toString().trim())) {
+                    AccessibilityNodeInfo click = clickableOf(node);
+                    if (click != null) return click;
+                }
+            }
+            return null;
         } catch (Exception e) {
             Log.e(TAG, "findButtonByText error: " + e.getMessage());
             return null;
@@ -173,26 +190,21 @@ public class AdbWifiAccessibilityService extends AccessibilityService {
     }
 
     /**
-     * 通过包含文本递归查找节点
+     * 通过包含文本递归查找节点（text 应为完整目标短语，如 "turn on adb wifi"）
      */
     private AccessibilityNodeInfo findButtonByTextContains(AccessibilityNodeInfo node, String text) {
         if (node == null) {
             return null;
         }
 
+        String needle = text.toLowerCase();
         CharSequence nodeText = node.getText();
-        if (nodeText != null && nodeText.toString().toLowerCase().contains(text.toLowerCase())) {
-            if (node.isClickable()) {
-                return node;
-            }
-            // 如果文本节点不可点击，找它的可点击父节点
-            AccessibilityNodeInfo parent = node.getParent();
-            while (parent != null) {
-                if (parent.isClickable()) {
-                    return parent;
-                }
-                parent = parent.getParent();
-            }
+        CharSequence nodeDesc = node.getContentDescription();
+        boolean hit = (nodeText != null && nodeText.toString().toLowerCase().contains(needle))
+                || (nodeDesc != null && nodeDesc.toString().toLowerCase().contains(needle));
+        if (hit) {
+            AccessibilityNodeInfo click = clickableOf(node);
+            if (click != null) return click;
         }
 
         for (int i = 0; i < node.getChildCount(); i++) {
@@ -203,6 +215,26 @@ public class AdbWifiAccessibilityService extends AccessibilityService {
         }
 
         return null;
+    }
+
+    /**
+     * 返回节点自身或其可点击祖先（限探 10 层）；都不可点击则返回 null
+     */
+    private static AccessibilityNodeInfo clickableOf(AccessibilityNodeInfo node) {
+        AccessibilityNodeInfo cur = node;
+        int depth = 0;
+        while (cur != null && depth++ < 10) {
+            if (cur.isClickable()) return cur;
+            cur = cur.getParent();
+        }
+        return null;
+    }
+
+    @Override
+    public void onDestroy() {
+        // [FIX] 清理滞留回调，服务销毁后不再执行点击任务
+        handler.removeCallbacksAndMessages(null);
+        super.onDestroy();
     }
 
     @Override
