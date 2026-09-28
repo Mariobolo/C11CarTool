@@ -154,6 +154,7 @@ public class TileView extends FrameLayout {
         seekBar.setProgressTintList(ColorStateList.valueOf(0xFF3B82F6));
         seekBar.setThumbTintList(ColorStateList.valueOf(0xFFFFFFFF));
         seekBar.setSplitTrack(false);
+        seekBar.setEnabled(false);   // 真实值到达前禁用，避免在假数据上操作
         seekBar.setKeyProgressIncrement(1);
         seekBar.setPadding(dp(4), dp(10), dp(4), dp(10));
         root.addView(seekBar, new LinearLayout.LayoutParams(
@@ -193,11 +194,22 @@ public class TileView extends FrameLayout {
         if (seekBar != null) {
             seekBar.setMax(Math.max(1, max - min));
             seekBar.setProgress(Math.max(0, Math.min(max - min, value - min)));
+            seekBar.setEnabled(true);
         }
         if (valueView != null) {
             valueView.setText(value + sliderUnit);
             valueView.setTextColor(DashboardTheme.TEXT);
         }
+    }
+
+    /** 滑块无数据：显 "--" 并禁用 SeekBar，等真实值到达（不放假数据）。 */
+    public void setSliderUnknown() {
+        failed = false;
+        if (valueView != null) {
+            valueView.setText("--");
+            valueView.setTextColor(DashboardTheme.DIM);
+        }
+        if (seekBar != null) seekBar.setEnabled(false);
     }
 
     public void setChecked(boolean c) {

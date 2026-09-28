@@ -189,13 +189,13 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
 
         // 音量（滑块 2×1）
         group("🔊 音量");
-        slider("vol_music", "媒体音量", 0, 100, 50, "",
+        slider("vol_music", "媒体音量", 0, 100, "",
                 v -> vc.setGlobalKey("C11_MUSIC", String.valueOf(v)));
-        slider("vol_navi", "导航音量", 0, 100, 50, "",
+        slider("vol_navi", "导航音量", 0, 100, "",
                 v -> vc.setGlobalKey("C11_NAVI", String.valueOf(v)));
-        slider("vol_speech", "语音音量", 0, 100, 50, "",
+        slider("vol_speech", "语音音量", 0, 100, "",
                 v -> vc.setGlobalKey("C11_SPEECH", String.valueOf(v)));
-        slider("vol_call", "通话音量", 0, 100, 50, "",
+        slider("vol_call", "通话音量", 0, 100, "",
                 v -> vc.setGlobalKey("C11_CALL", String.valueOf(v)));
 
         // 胎压胎温
@@ -216,9 +216,9 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
 
         // 空调座舱
         group("❄ 空调座舱");
-        slider("temp_driver", "主驾温度", 16, 32, 22, "℃", vc::setAcTemperatureDriver);
-        slider("temp_pass", "副驾温度", 16, 32, 22, "℃", vc::setAcTemperaturePassenger);
-        slider("fan", "风量", 1, 7, 3, "档", vc::setAcFanSpeed);
+        slider("temp_driver", "主驾温度", 16, 32, "℃", vc::setAcTemperatureDriver);
+        slider("temp_pass", "副驾温度", 16, 32, "℃", vc::setAcTemperaturePassenger);
+        slider("fan", "风量", 1, 7, "档", vc::setAcFanSpeed);
         toggle("ac", "空调", "ac");
         toggle("acmax", "最大制冷", "max");
         innerLoopTile();   // [FIX-20260928] 三态轮转（外→内→自动），补齐自动模式
@@ -323,10 +323,10 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         return c;
     }
 
-    private void slider(String id, String label, int min, int max, int init, String unit,
+    private void slider(String id, String label, int min, int max, String unit,
                         java.util.function.IntConsumer handler) {
         TileView t = tile(id, TileView.Type.SLIDER, label, 2, 1);
-        t.setSlider(min, max, init, unit);
+        t.setSliderUnknown();
         t.setListener(new TileView.Listener() {
             @Override public void onSlider(int v) { handler.accept(v); }
         });
@@ -703,10 +703,10 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         setDoorCached("hood", s.doorStates, 5);
 
         // 空调滑块 + 开关
-        if (s.driverTempHalf >= 0)
-            setSliderTile("temp_driver", 16, 32, Math.round(s.driverTempHalf / 2f), "℃");
-        if (s.passengerTempHalf >= 0)
-            setSliderTile("temp_pass", 16, 32, Math.round(s.passengerTempHalf / 2f), "℃");
+        setSliderTile("temp_driver", 16, 32,
+                s.driverTempHalf >= 0 ? Math.round(s.driverTempHalf / 2f) : -1, "℃");
+        setSliderTile("temp_pass", 16, 32,
+                s.passengerTempHalf >= 0 ? Math.round(s.passengerTempHalf / 2f) : -1, "℃");
         setSliderTile("fan", 1, 7, s.fanSpeed, "档");
         setToggle("ac", s.acSwitch);
         // [FIX-20260928] 循环三态：有值时同步轮转起点与标签
@@ -754,6 +754,7 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
 
     private void setSliderTile(String id, int min, int max, int value, String unit) {
         if (value >= 0) t(id).setSlider(min, max, value, unit);
+        else t(id).setSliderUnknown();
     }
 
     private void setRawTile(String id, String raw) {
