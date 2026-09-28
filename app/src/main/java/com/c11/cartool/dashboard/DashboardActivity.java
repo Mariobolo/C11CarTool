@@ -73,6 +73,12 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
     private final int[] lastDoor = {-1, -1, -1, -1, -1, -1};
     private int innerLoopMode = 1;
 
+    // [v0.3.11] 低频数据「最后已知值」缓存：读到一次持续显示，新值有效才更新，从未读到才 --（功能6）
+    private final java.util.Map<String, Integer> cacheInt = new java.util.HashMap<>();
+    private final java.util.Map<String, Float> cacheFloat = new java.util.HashMap<>();
+    private final java.util.Map<String, int[]> cacheSlider = new java.util.HashMap<>(); // {min,max,value}
+    private String cacheGear = null;
+
     // [FIX-20260928] 主题（A=纯色光晕 / B=必应壁纸），ThemeManager 持久化，切换入口见状态条 🎨
     private ThemeManager themeManager;
     private LinearLayout rootView;
@@ -104,6 +110,8 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         stateListener = new Sh.StateListener() {
             @Override public void onAdbStateChanged(boolean connected, int uid) {
                 ui.post(DashboardActivity.this::updateStatusBar);
+                // [v0.3.11] ADB 一连上立即补采一轮（含 -b all 启动历史），避免错过初始化信号（功能7）
+                if (connected && repository != null) repository.requestRefresh();
             }
         };
         Sh.addStateListener(stateListener);
@@ -328,7 +336,18 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         TileView t = tile(id, TileView.Type.SLIDER, label, 2, 1);
         t.setSliderUnknown();
         t.setListener(new TileView.Listener() {
-            @Override public void onSlider(int v) { handler.accept(v); }
+            @Override public void onSlider(int v) {
+                // P0 修复：SeekBar 回调在主线程，写入必须放子线程（直接调 Sh.run 会持锁卡死）
+                Sh.submitAsync(() -> {
+                    boolean ok = false;
+                    try { handler.accept(v); ok = true; }
+                    catch (Exception e) { Logger.error("滑块", label + " 写入异常", e); }
+                    final boolean fOk = ok;
+                    runOnUiThread(() -> Toast.makeText(DashboardActivity.this,
+                            label + " " + v + (fOk ? " ✅" : " ❌"), Toast.LENGTH_SHORT).show());
+                    if (repository != null) ui.postDelayed(() -> repository.requestRefresh(), 1200);
+                });
+            }
         });
     }
 
@@ -670,23 +689,25 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         if (!Float.isNaN(powerKw)) powerChart.addPoint(powerKw);
         if (s.speedKmh >= 0) speedChart.addPoint(s.speedKmh);
 
-        // 行车数值
-        setInt("soc", s.batterySoc, "%");
-        setInt("range", s.rangeDyn >= 0 ? s.rangeDyn : s.rangeStd, "km");
-        setFloat("volt", s.voltage, "V");
-        setFloat("current", s.current, "A");
-        if (!Float.isNaN(powerKw)) t("power").setValue(fmt1(powerKw), "kW");
-        else t("power").setFailed();
-        setInt("speed", s.speedKmh, "km/h");
-        t("gear").setValue(s.gear == null || s.gear.isEmpty() ? "--" : s.gear, "");
-        setInt("outtemp", s.outsideTemp, "℃");
-        setInt("pm25", s.pm25, "");
+        // 行车数值（全部走最后已知值缓存）
+        setIntCached("soc", s.batterySoc, "%");
+        setIntCached("range", s.rangeDyn >= 0 ? s.rangeDyn : s.rangeStd, "km");
+        setFloatCached("volt", s.voltage, "V");
+        setFloatCached("current", s.current, "A");
+        if (!Float.isNaN(powerKw)) { cacheFloat.put("power", powerKw); t("power").setValue(fmt1(powerKw), "kW"); }
+        else { Float pc = cacheFloat.get("power"); if (pc != null) t("power").setValue(fmt1(pc), "缓"); else t("power").setFailed(); }
+        setIntCached("speed", s.speedKmh, "km/h");
+        if (s.gear != null && !s.gear.isEmpty()) { cacheGear = s.gear; t("gear").setValue(s.gear, ""); }
+        else if (cacheGear != null) t("gear").setValue(cacheGear, "缓");
+        else t("gear").setValue("--", "");
+        setIntCached("outtemp", s.outsideTemp, "℃");
+        setIntCached("pm25", s.pm25, "");
 
-        // 音量滑块
-        setSliderTile("vol_music", 0, 100, s.musicVol, "");
-        setSliderTile("vol_navi", 0, 100, s.naviVol, "");
-        setSliderTile("vol_speech", 0, 100, s.speechVol, "");
-        setSliderTile("vol_call", 0, 100, s.callVol, "");
+        // 音量滑块（缓存）
+        setSliderCached("vol_music", 0, 100, s.musicVol, "");
+        setSliderCached("vol_navi", 0, 100, s.naviVol, "");
+        setSliderCached("vol_speech", 0, 100, s.speechVol, "");
+        setSliderCached("vol_call", 0, 100, s.callVol, "");
 
         // 胎压
         setTire("tire_fl", s, 0);
@@ -703,11 +724,11 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         setDoorCached("hood", s.doorStates, 5);
 
         // 空调滑块 + 开关
-        setSliderTile("temp_driver", 16, 32,
+        setSliderCached("temp_driver", 16, 32,
                 s.driverTempHalf >= 0 ? Math.round(s.driverTempHalf / 2f) : -1, "℃");
-        setSliderTile("temp_pass", 16, 32,
+        setSliderCached("temp_pass", 16, 32,
                 s.passengerTempHalf >= 0 ? Math.round(s.passengerTempHalf / 2f) : -1, "℃");
-        setSliderTile("fan", 1, 7, s.fanSpeed, "档");
+        setSliderCached("fan", 1, 7, s.fanSpeed, "档");
         setToggle("ac", s.acSwitch);
         // [FIX-20260928] 循环三态：有值时同步轮转起点与标签
         if (s.innerCycle >= 0) {
@@ -747,14 +768,27 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
 
     // ── 数据更新 helper ──
 
-    private void setInt(String id, int value, String unit) {
-        if (value >= 0) t(id).setValue(String.valueOf(value), unit);
-        else t(id).setFailed();
+    // [v0.3.11] 数据 helper 走「最后已知值」缓存：新值有效更新缓存，无效沿用缓存（标"缓"），从未读到才失败
+    private void setIntCached(String id, int value, String unit) {
+        if (value >= 0) {
+            cacheInt.put(id, value);
+            t(id).setValue(String.valueOf(value), unit);
+        } else {
+            Integer c = cacheInt.get(id);
+            if (c != null) t(id).setValue(String.valueOf(c), "缓");
+            else t(id).setFailed();
+        }
     }
 
-    private void setSliderTile(String id, int min, int max, int value, String unit) {
-        if (value >= 0) t(id).setSlider(min, max, value, unit);
-        else t(id).setSliderUnknown();
+    private void setSliderCached(String id, int min, int max, int value, String unit) {
+        if (value >= 0) {
+            cacheSlider.put(id, new int[]{min, max, value});
+            t(id).setSlider(min, max, value, unit);
+        } else {
+            int[] c = cacheSlider.get(id);
+            if (c != null) t(id).setSlider(c[0], c[1], c[2], unit);
+            else t(id).setSliderUnknown();
+        }
     }
 
     private void setRawTile(String id, String raw) {
@@ -770,9 +804,15 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         catch (Exception e) { return -1; }
     }
 
-    private void setFloat(String id, float value, String unit) {
-        if (value >= 0) t(id).setValue(fmt1(value), unit);
-        else t(id).setFailed();
+    private void setFloatCached(String id, float value, String unit) {
+        if (value >= 0) {
+            cacheFloat.put(id, value);
+            t(id).setValue(fmt1(value), unit);
+        } else {
+            Float c = cacheFloat.get(id);
+            if (c != null) t(id).setValue(fmt1(c), "缓");
+            else t(id).setFailed();
+        }
     }
 
     private void setToggle(String id, int value) {

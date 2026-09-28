@@ -354,6 +354,7 @@ public final class AdbClient {
 
             // 握手阶段：只处理属于本流(arg1==localId)的消息，忽略上一流残留
             long handshakeDeadline = System.currentTimeMillis() + 8000;
+            try { socket.setSoTimeout(3000); } catch (Exception ignored) {} // 单条握手消息不应久等，避免持锁卡死
             while (System.currentTimeMillis() < handshakeDeadline) {
                 AdbMessage msg = readMessage();
                 if (msg == null) {
@@ -385,6 +386,10 @@ public final class AdbClient {
             long deadline = System.currentTimeMillis() + timeoutMs;
             boolean cleanClose = false;
             while (System.currentTimeMillis() < deadline) {
+                // 关键：read 阻塞上限对齐剩余时间（连接后 soTimeout 曾固定 30s，导致命令超时后仍持锁卡死）
+                long remain = deadline - System.currentTimeMillis();
+                try { socket.setSoTimeout((int) Math.max(200, Math.min(remain, 5000))); }
+                catch (Exception ignored) {}
                 AdbMessage msg = readMessage();
                 if (msg == null) break;
                 if (msg.arg1 != localId) {

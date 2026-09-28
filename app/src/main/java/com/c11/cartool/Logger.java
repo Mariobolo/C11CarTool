@@ -36,12 +36,17 @@ public final class Logger {
     public interface Callback { void onLog(String line, Level level); }
     public interface PerfCallback { void onPerf(String cmd, long durationMs); }
 
-    private static volatile Callback cb;
-    private static volatile PerfCallback perfCb;
+    // [v0.3.11] 回调改 WeakReference：静态字段不再强引用 Activity/页面，销毁后由 GC 自动回收（修复内存泄漏）
+    private static volatile java.lang.ref.WeakReference<Callback> cbRef;
+    private static volatile java.lang.ref.WeakReference<PerfCallback> perfCbRef;
     private static final List<String> cmdLog = new ArrayList<>();
 
-    public static void setCallback(Callback c) { cb = c; }
-    public static void setPerfCallback(PerfCallback c) { perfCb = c; }
+    public static void setCallback(Callback c) {
+        cbRef = c == null ? null : new java.lang.ref.WeakReference<Callback>(c);
+    }
+    public static void setPerfCallback(PerfCallback c) {
+        perfCbRef = c == null ? null : new java.lang.ref.WeakReference<PerfCallback>(c);
+    }
 
     // ═══ 带标签的日志方法（用于模块区分） ═══
 
@@ -84,7 +89,7 @@ public final class Logger {
     }
 
     public static void onPerf(String cmd, long durationMs) {
-        PerfCallback p = perfCb;
+        PerfCallback p = perfCbRef == null ? null : perfCbRef.get();
         if (p != null) p.onPerf(cmd, durationMs);
     }
 
@@ -168,8 +173,8 @@ public final class Logger {
             default:    Log.i(TAG, "  " + msg); break;
         }
 
-        // UI 回调
-        Callback c = cb;
+        // UI 回调（弱引用，目标已回收则跳过）
+        Callback c = cbRef == null ? null : cbRef.get();
         if (c != null) {
             try {
                 c.onLog(line, lv);

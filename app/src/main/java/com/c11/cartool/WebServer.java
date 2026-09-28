@@ -60,6 +60,8 @@ public class WebServer {
      */
     /** 端口探测上限（preferred..preferred+20） */
     private static final int PORT_SCAN_RANGE = 20;
+    /** [SECURITY v0.3.11] 请求体上限 64KB（车控指令很小，超限拒绝，防超大 Content-Length 耗尽内存） */
+    private static final int MAX_BODY_BYTES = 64 * 1024;
 
     public boolean start(int preferredPort) {
         if (running) {
@@ -222,6 +224,8 @@ public class WebServer {
 
     private void handleClient(Socket client) {
         try {
+            // [SECURITY v0.3.11] 连接读超时：恶意/僵死连接连上不发数据，8s 后线程退出，防连接耗尽
+            client.setSoTimeout(8000);
             InputStream in = client.getInputStream();
             OutputStream out = client.getOutputStream();
 
@@ -261,6 +265,13 @@ public class WebServer {
             }
 
             // 读取请求体
+            // [SECURITY v0.3.11] 请求体上限：超限直接 413，防超大 Content-Length 触发巨型数组 OOM
+            if (contentLength > MAX_BODY_BYTES) {
+                sendResponse(out, 413, "application/json; charset=utf-8",
+                        "{\"success\":false,\"error\":\"payload too large\"}".getBytes(StandardCharsets.UTF_8));
+                client.close();
+                return;
+            }
             String body = "";
             if (contentLength > 0) {
                 char[] buf = new char[contentLength];
@@ -291,16 +302,12 @@ public class WebServer {
         int qIdx = path.indexOf('?');
         if (qIdx > 0) purePath = path.substring(0, qIdx);
 
-        // [SECURITY] /api/control 鉴权检查
-        if (purePath.equals("/api/control")) {
-            String token = headers != null ? headers.get("x-auth-token") : null;
-            if (token == null) token = extractTokenFromPath(path);
-            if (authToken != null && !authToken.isEmpty() && !authToken.equals(token)) {
-                Logger.warn(TAG, "[SECURITY] /api/control 鉴权失败，拒绝请求");
-                sendResponse(out, 401, "application/json; charset=utf-8",
-                        "{\"success\":false,\"error\":\"unauthorized: missing or invalid token\"}".getBytes(StandardCharsets.UTF_8));
-                return;
-            }
+        // [SECURITY v0.3.11] 统一鉴权：控制/状态/日志/诊断均需 token（X-Auth-Token 头或 query ?t=），仅 /api/info 公开
+        if (purePath.startsWith("/api/") && isProtectedApi(purePath) && !isTokenValid(path, headers)) {
+            Logger.warn(TAG, "[SECURITY] " + purePath + " 鉴权失败，拒绝请求");
+            sendResponse(out, 401, "application/json; charset=utf-8",
+                    "{\"success\":false,\"error\":\"unauthorized: missing or invalid token\"}".getBytes(StandardCharsets.UTF_8));
+            return;
         }
 
         // 静态页面（携带 token 注入到 JS）
@@ -407,6 +414,19 @@ public class WebServer {
 
         sb.append("}}");
         return sb.toString();
+    }
+
+    /** 需鉴权的 API（/api/info 作为发现/自检端点保持公开）。 */
+    private static boolean isProtectedApi(String p) {
+        return "/api/control".equals(p) || "/api/status".equals(p)
+            || "/api/logs".equals(p) || "/api/diagnostic".equals(p);
+    }
+
+    /** 校验 X-Auth-Token 头或 query ?t= 是否匹配。 */
+    private boolean isTokenValid(String path, Map<String, String> headers) {
+        String token = headers != null ? headers.get("x-auth-token") : null;
+        if (token == null) token = extractTokenFromPath(path);
+        return authToken == null || authToken.isEmpty() || authToken.equals(token);
     }
 
     /** 从 URL path 中提取 token 参数 */
@@ -531,7 +551,15 @@ public class WebServer {
     // ═══ 工具方法 ═══
 
     private void sendResponse(OutputStream out, int status, String contentType, byte[] body) throws IOException {
-        String statusText = status == 200 ? "OK" : status == 404 ? "Not Found" : status == 500 ? "Internal Server Error" : status == 401 ? "Unauthorized" : "Error";
+        String statusText;
+        switch (status) {
+            case 200: statusText = "OK"; break;
+            case 401: statusText = "Unauthorized"; break;
+            case 404: statusText = "Not Found"; break;
+            case 413: statusText = "Payload Too Large"; break;
+            case 500: statusText = "Internal Server Error"; break;
+            default:  statusText = "Error"; break;
+        }
         // [SECURITY] CORS 收紧：不再 * 全开
         String header = "HTTP/1.1 " + status + " " + statusText + "\r\n" +
                        "Content-Type: " + contentType + "\r\n" +

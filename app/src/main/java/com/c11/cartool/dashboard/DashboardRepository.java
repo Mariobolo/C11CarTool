@@ -127,8 +127,10 @@ public class DashboardRepository {
         }
 
         // ── logcat：核心 TAG 一次性拉取解析 ──
+        // [v0.3.11] -b all：从 main/system/events 全部缓冲区历史补读，车辆启动的一次性初始化信号
+        // （车门/电量等，常落在 system buffer）即使 App 启动更晚也能取回，不再长期为空（功能7）。
         String tags = join(" ", LOG_TAGS);
-        Sh.Result l = Sh.run("logcat -d -v brief -s " + tags, 10000);
+        Sh.Result l = Sh.run("logcat -b all -d -v brief -s " + tags, 15000);
         LogcatVehicleSource.Result pr = null;
         if (l.ok() && l.out != null && !l.out.trim().isEmpty()) {
             pr = LogcatVehicleSource.parse(l.out);
