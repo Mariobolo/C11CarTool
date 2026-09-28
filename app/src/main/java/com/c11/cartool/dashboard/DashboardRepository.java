@@ -343,6 +343,9 @@ public class DashboardRepository {
             }
             if (pr.gps.count > 0)
                 all.add(new SignalRow("定位", "GPS", pr.gps.meaning, "LocationDataC23"));
+            if (pr.gearByMonitor.count > 0)
+                all.add(new SignalRow("动力/底盘", "档位(GearMonitor)",
+                        pr.gearByMonitor.raw, "GearMonitorService/AIDL"));
             if (!pr.tripMile.isEmpty()) {
                 all.add(new SignalRow("行程", "自启动里程", pr.tripMile + " km",
                         "EnergyDataBinder/EV_MILE"));
@@ -373,6 +376,7 @@ public class DashboardRepository {
 
         String g = xml(r, "gear");
         if (g.isEmpty()) g = meaningOf(r, 1110);
+        if (g.isEmpty() && r.gearByMonitor.count > 0) g = r.gearByMonitor.raw;
         if (!g.isEmpty()) snap.gear = g;
 
         snap.rangeStd = intOf(xml(r, "rangeStandard"), -1);

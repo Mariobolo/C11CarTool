@@ -202,6 +202,12 @@ public final class LogcatVehicleSource {
             "TPMSBean\\{pos=(\\d+),.*?singleTirePress=(\\d+),.*?singleTireTemp=(\\d+)");
     private static final Pattern RE_GPS = Pattern.compile(
             "D:\\(([\\d.]+)\\s+([\\d.]+)\\s+([\\d.]+)\\)\\s+course:([\\d.]+)\\s+tickTime:(\\d+)\\s+status:(\\w)");
+    /**
+     * GearMonitorService 档位（AIDL 主动上报，直接给 P/N/D/R 字母），兼容两种写法：
+     *   "🚗 检测到N档 (通过AIDL)" / "档位更新: N"。档位的独立第三渠道。
+     */
+    private static final Pattern RE_GEAR_MONITOR = Pattern.compile(
+            "(?:检测到|档位更新\\s*:?)\\s*([PNDR])\\s*档?");
     /** EnergyDataBinder：行程里程 / 时间 / 平均能耗（三段连写，无分隔符）。 */
     private static final Pattern RE_ENERGY = Pattern.compile(
             "updateEnergyData:\\s*EV_MILE:\\s*([\\d.]+)\\s*EV_TIME:\\s*(\\d+)\\s*EV_AVERAGE_CONSUME:\\s*([\\d.]+)");
@@ -218,6 +224,8 @@ public final class LogcatVehicleSource {
         public final Map<String, State> xmlStates = new LinkedHashMap<String, State>();
         public final Map<Integer, State> tireStates = new TreeMap<Integer, State>();
         public final State gps = new State();
+        /** GearMonitorService 档位（AIDL，档位第三渠道；count=0 表示本轮未出现，不填默认值）。 */
+        public final State gearByMonitor = new State();
         /** EnergyDataBinder 行程三件套（空串=本轮未出现，不填默认值）。 */
         public String tripMile = "", tripTime = "", tripConsume = "";
         public final ArrayList<Integer> unknownEvents = new ArrayList<Integer>();
@@ -283,6 +291,18 @@ public final class LogcatVehicleSource {
                 r.gps.source = "LocationDataC23";
                 r.gps.count++;
                 continue;
+            }
+            // GearMonitorService：AIDL 档位上报（与 eventId 1110 / XML gear 互为多渠道）
+            if (line.contains("GearMonitor")) {
+                Matcher gm = RE_GEAR_MONITOR.matcher(line);
+                if (gm.find()) {
+                    r.gearByMonitor.name = "档位(GearMonitor)";
+                    r.gearByMonitor.raw = gm.group(1);
+                    r.gearByMonitor.meaning = gm.group(1);
+                    r.gearByMonitor.source = "GearMonitor";
+                    r.gearByMonitor.count++;
+                    continue;
+                }
             }
             m = RE_XML.matcher(line);
             if (m.find() && (line.contains("C11CarXml") || line.contains("C11AirConditioner"))) {
@@ -377,6 +397,11 @@ public final class LogcatVehicleSource {
         if (r.gps.count > 0) {
             sb.append("  ── 定位 ──\n    ").append(r.gps.meaning)
               .append("（").append(r.gps.count).append(" 次）\n");
+        }
+
+        if (r.gearByMonitor.count > 0) {
+            sb.append("  ── 档位（GearMonitorService·AIDL）──\n    ")
+              .append(r.gearByMonitor.raw).append("  [×").append(r.gearByMonitor.count).append("]\n");
         }
 
         if (!r.tripMile.isEmpty()) {
