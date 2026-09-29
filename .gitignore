@@ -12,3 +12,11 @@ local.properties
 
 # OS
 Thumbs.db
+
+# Local-only working/audit docs (kept on disk, not published to GitHub)
+/FIXES-*.md
+/LOGCAT-AUDIT-*.md
+/OPTIMIZATION-REPORT.md
+/RELEASE-v*.md
+/THEME-AUDIT.md
+/WORKLOG.md
