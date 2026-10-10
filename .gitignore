@@ -4,6 +4,7 @@ build/
 local.properties
 *.apk
 *.aab
+*.log
 
 # IDE
 .idea/
@@ -15,6 +16,7 @@ Thumbs.db
 
 # Local-only working/audit docs (kept on disk, not published to GitHub)
 /FIXES-*.md
+/ISSUES-*.md
 /LOGCAT-AUDIT-*.md
 /OPTIMIZATION-REPORT.md
 /RELEASE-v*.md

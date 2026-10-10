@@ -65,10 +65,30 @@ public class ControlListPage extends LinearLayout {
     private final LinearLayout content;
     private final Handler main = new Handler(Looper.getMainLooper());
 
-    public ControlListPage(Context ctx, VehicleController vc, CommandRunner runner) {
+    public ControlListPage(Context ctx, VehicleController vc, CommandRunner runner, final Runnable onBack) {
         super(ctx);
         setOrientation(VERTICAL);
         setBackgroundColor(DashboardTheme.BG);
+
+        // [v0.3.13] 界面内返回（不依赖硬件返回键）
+        LinearLayout header = new LinearLayout(ctx);
+        header.setOrientation(HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setBackgroundColor(DashboardTheme.SURFACE);
+        TextView back = new TextView(ctx);
+        back.setText("← 返回");
+        back.setTextColor(DashboardTheme.BLUE);
+        back.setTextSize(15);
+        back.setPadding(dp(14), dp(10), dp(14), dp(10));
+        back.setOnClickListener(v -> { if (onBack != null) onBack.run(); });
+        TextView title = new TextView(ctx);
+        title.setText("全部车控");
+        title.setTextColor(DashboardTheme.TEXT);
+        title.setTextSize(17);
+        title.setPadding(dp(4), 0, 0, 0);
+        header.addView(back);
+        header.addView(title);
+        addView(header, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
         TextView hint = new TextView(ctx);
         hint.setText("点击即下发；🟢已开 🔴已关 ⚪未知；⚠ = 通道待标定。多通道同名按钮请分别试，观察实车确定正解。");

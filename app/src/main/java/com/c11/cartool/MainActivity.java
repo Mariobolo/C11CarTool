@@ -158,7 +158,10 @@ public class MainActivity extends Activity {
             lastCmdTime = durationMs;
         });
 
-        setContentView(buildUI());
+        // [v0.3.12] 系统栏避让（导航栏隐藏失败时内容避开，与 DashboardActivity 同策略）
+        View rootUi = buildUI();
+        setContentView(rootUi);
+        applySystemBarInsets(rootUi);
 
         // 初始化（本地运行模式，不需要 ADB 连接）
         Sh.submitAsync(() -> {
@@ -882,12 +885,18 @@ public class MainActivity extends Activity {
         themeRow.addView(makeSmallBtn("🌙 深色", darkTheme ? C_GREEN : C_SURFACE, v -> {
             darkTheme = true;
             prefs.edit().putBoolean("dark_theme", true).apply();
-            setContentView(buildUI());
+            // [v0.3.12] 系统栏避让（导航栏隐藏失败时内容避开，与 DashboardActivity 同策略）
+        View rootUi = buildUI();
+        setContentView(rootUi);
+        applySystemBarInsets(rootUi);
         }));
         themeRow.addView(makeSmallBtn("☀️ 浅色", darkTheme ? C_SURFACE : C_GREEN, v -> {
             darkTheme = false;
             prefs.edit().putBoolean("dark_theme", false).apply();
-            setContentView(buildUI());
+            // [v0.3.12] 系统栏避让（导航栏隐藏失败时内容避开，与 DashboardActivity 同策略）
+        View rootUi = buildUI();
+        setContentView(rootUi);
+        applySystemBarInsets(rootUi);
         }));
         contentArea.addView(themeRow);
 
@@ -899,8 +908,11 @@ public class MainActivity extends Activity {
         // WiFi ADB 自动开启
         contentArea.addView(makeSectionTitle("📶 WiFi ADB 自动开启"));
 
-        // 无障碍服务状态
-        boolean accEnabled = BootReceiver.isAccessibilityServiceEnabled(this);
+        // 无障碍服务状态（检测新版通用无障碍 C11AssistService）
+        String accEn = android.provider.Settings.Secure.getString(getContentResolver(),
+                android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        boolean accEnabled = accEn != null && accEn.contains(getPackageName() + "/"
+                + com.c11.cartool.assist.C11AssistService.class.getName());
         LinearLayout accRow = new LinearLayout(this);
         accRow.setOrientation(LinearLayout.HORIZONTAL);
         accRow.setBackgroundColor(darkTheme ? C_CARD : C_LIGHT_CARD);
@@ -944,7 +956,7 @@ public class MainActivity extends Activity {
         contentArea.addView(accHint);
 
         // 开机自动开启开关
-        boolean autoStart = prefs.getBoolean(BootReceiver.KEY_AUTO_START_ADB_WIFI, false);
+        boolean autoStart = new com.c11.cartool.assist.AssistConfig(this).adbAuto();
         LinearLayout autoRow = new LinearLayout(this);
         autoRow.setOrientation(LinearLayout.HORIZONTAL);
         autoRow.setBackgroundColor(darkTheme ? C_CARD : C_LIGHT_CARD);
@@ -959,9 +971,9 @@ public class MainActivity extends Activity {
 
         Button autoToggleBtn = makeSmallBtn(autoStart ? "✅ 已开启" : "❌ 已关闭",
                 autoStart ? C_GREEN : C_SURFACE, v -> {
-            boolean current = prefs.getBoolean(BootReceiver.KEY_AUTO_START_ADB_WIFI, false);
+            boolean current = new com.c11.cartool.assist.AssistConfig(this).adbAuto();
             boolean newVal = !current;
-            prefs.edit().putBoolean(BootReceiver.KEY_AUTO_START_ADB_WIFI, newVal).apply();
+            new com.c11.cartool.assist.AssistConfig(this).setAdbAuto(newVal);
             Logger.ok("开机自动开启 WiFi ADB: " + (newVal ? "已开启" : "已关闭"));
             switchTab(TAB_NAMES.length - 1); // 刷新页面
         });
@@ -970,7 +982,11 @@ public class MainActivity extends Activity {
 
         // 立即开启按钮
         contentArea.addView(makeBtn("🚀 立即开启 WiFi ADB", C_GREEN, v -> {
-            if (!BootReceiver.isAccessibilityServiceEnabled(this)) {
+            String accEn2 = android.provider.Settings.Secure.getString(getContentResolver(),
+                    android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            boolean accNow = accEn2 != null && accEn2.contains(getPackageName() + "/"
+                    + com.c11.cartool.assist.C11AssistService.class.getName());
+            if (!accNow) {
                 new AlertDialog.Builder(this)
                         .setTitle("需要无障碍服务")
                         .setMessage("请先在系统设置中开启本应用的无障碍服务，才能自动点击 WiFi ADB 按钮。\n\n是否现在去开启？")
@@ -1532,7 +1548,18 @@ public class MainActivity extends Activity {
         }
     }
 
-    @Override
+    /** [v0.3.12] 系统栏避让：导航栏隐藏失败时按 insets 让内容避开，保证全部可见 */
+    private void applySystemBarInsets(final View target) {
+        if (target == null) return;
+        target.setOnApplyWindowInsetsListener((v, insets) -> {
+            int top = insets.getSystemWindowInsetTop();
+            int bottom = insets.getSystemWindowInsetBottom();
+            if (top > 0 || bottom > 0) v.setPadding(0, top, 0, bottom);
+            return insets;
+        });
+        target.requestApplyInsets();
+    }
+
     protected void onDestroy() {
         // [FIX] 生命周期清理：取消进行中的车控实验，防止后台线程继续驱动 UI 弹框
         CarControlExperiment.RunHandle r = experimentRun;

@@ -1,0 +1,5 @@
+﻿bad_remains=0
+javadoc_ok=True
+linecmt_ok=True
+orphan_override=False
+method_ok=True

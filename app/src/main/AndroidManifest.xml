@@ -16,7 +16,7 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <!-- 列出全部应用以选择播放器（API 30+ 生效，API 28 上无害） -->
+    <!-- 列出全部应用以选择程序/播放器（API 30+ 生效，API 28 上无害） -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
     <application
@@ -25,7 +25,7 @@
         android:allowBackup="false"
         android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
 
-        <!-- 主入口：公开版仪表盘（打开即桌面） -->
+        <!-- 主入口：仪表盘（打开即桌面） -->
         <activity
             android:name=".dashboard.DashboardActivity"
             android:exported="true"
@@ -40,7 +40,7 @@
             </intent-filter>
         </activity>
 
-        <!-- 工程模式：一键全测/诊断/车控实验/25 类参数浏览（从仪表盘右上角进入） -->
+        <!-- 工程模式：一键全测/诊断/车控实验/参数浏览（从仪表盘右上角进入） -->
         <activity
             android:name=".MainActivity"
             android:exported="false"
@@ -58,7 +58,25 @@
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation" />
 
-        <!-- 开机广播接收器：开机后自动启动 Demo 软件以开启 WiFi ADB -->
+        <!-- 3D 车模第二界面（右侧悬浮按钮 / 左滑手势进入） -->
+        <activity
+            android:name=".Car3DActivity"
+            android:exported="false"
+            android:label="C11 车控 · 3D 车模"
+            android:screenOrientation="landscape"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation" />
+
+        <!-- 功能辅助页面：开机自动化/多屏启动/限制解除/转向360/TTS/语音控制 -->
+        <activity
+            android:name=".assist.AssistActivity"
+            android:exported="false"
+            android:label="C11 车控 · 功能辅助"
+            android:screenOrientation="landscape"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation" />
+
+        <!-- 开机广播接收器：启动开机顺序自动化服务 -->
         <receiver
             android:name=".BootReceiver"
             android:exported="true"
@@ -69,9 +87,9 @@
             </intent-filter>
         </receiver>
 
-        <!-- 无障碍服务：自动点击 "turn on adb wifi" 按钮 -->
+        <!-- 通用无障碍服务：点击系统 Demo 的 ADB 开关、点击 360 内部镜头按钮 -->
         <service
-            android:name=".AdbWifiAccessibilityService"
+            android:name=".assist.C11AssistService"
             android:exported="true"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
@@ -81,6 +99,16 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
+
+        <!-- 开机顺序自动化（前台服务） -->
+        <service
+            android:name=".assist.BootAutomationService"
+            android:exported="false" />
+
+        <!-- 转向灯 360 视觉辅助（前台常驻） -->
+        <service
+            android:name=".assist.TurnSignal360Service"
+            android:exported="false" />
 
         <!-- 媒体按键（方控 / 蓝牙）转发到当前播放器 -->
         <receiver

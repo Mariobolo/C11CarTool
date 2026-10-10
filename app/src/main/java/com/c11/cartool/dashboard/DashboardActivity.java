@@ -2,13 +2,17 @@ package com.c11.cartool.dashboard;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.Handler;
+import android.view.GestureDetector;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -16,6 +20,7 @@ import android.widget.Toast;
 import android.widget.ViewFlipper;
 
 import com.c11.cartool.AppInfo;
+import com.c11.cartool.Car3DActivity;
 import com.c11.cartool.CrashHandler;
 import com.c11.cartool.DiagnosticRunner;
 import com.c11.cartool.LogExport;
@@ -55,14 +60,14 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
 
     private FlowGridLayout flow;
     private final Map<String, TileView> tiles = new LinkedHashMap<>();
+    // [v0.3.12] 车窗内嵌四滑块（主界面直显，替代弹窗）
+    private WindowSliderView windowSlider;
 
     // v0.3.10 仪表 / 波形图表
     private GaugeView speedGauge, socGauge, powerGauge;
     private LineChartView voltageChart, currentChart, powerChart, speedChart;
 
     private TextView adbChip, gearChip, speedChip, powerChip, timeChip, webChip;
-
-    private static final String[] WIN_TITLES = {"主驾车窗", "副驾车窗", "左后车窗", "右后车窗"};
 
     private volatile DashboardSnapshot latest;
     private Sh.StateListener stateListener;
@@ -127,12 +132,12 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
     // ═══════════════════════════════════════════════
 
     private void buildUi() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        rootView = root;
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        rootView = content;
         applyThemeBackground();   // [FIX-20260928] 按主题 A/B 应用背景（壁纸失败自动降级主题 A）
 
-        root.addView(buildStatusBar(), new LinearLayout.LayoutParams(
+        content.addView(buildStatusBar(), new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(40)));
 
         pageSwitcher = new ViewFlipper(this);
@@ -141,22 +146,45 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         pageSwitcher.setOutAnimation(this, android.R.anim.fade_out);
         pageSwitcher.addView(buildGridPage());
 
-        signalPage = new SignalListPage(this);
+        signalPage = new SignalListPage(this, () -> showPage(0));
         pageSwitcher.addView(signalPage);
 
         controlPage = new ControlListPage(this, vc, new ControlListPage.CommandRunner() {
             @Override public void run(String label, Callable<Boolean> task) {
                 runCommand(label, task);
             }
-        });
+        }, () -> showPage(0));
         pageSwitcher.addView(controlPage);
 
-        root.addView(pageSwitcher, new LinearLayout.LayoutParams(
+        content.addView(pageSwitcher, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
-        root.addView(buildDock(), new LinearLayout.LayoutParams(
+        content.addView(buildDock(), new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(52)));
 
-        setContentView(root);
+        // [v0.3.13] 外层 FrameLayout：右侧悬浮「3D」入口（车模第二界面）
+        FrameLayout host = new FrameLayout(this);
+        host.addView(content, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        TextView fab3d = new TextView(this);
+        fab3d.setText("3D");
+        fab3d.setTextColor(0xFFE4E4E7);
+        fab3d.setTextSize(18);
+        fab3d.setGravity(Gravity.CENTER);
+        android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
+        gd.setColor(0xCC1A1D27);
+        gd.setCornerRadius(dp(28));
+        gd.setStroke(dp(1), 0x66FFFFFF);
+        fab3d.setBackground(gd);
+        FrameLayout.LayoutParams flp = new FrameLayout.LayoutParams(dp(56), dp(56),
+                Gravity.END | Gravity.CENTER_VERTICAL);
+        flp.rightMargin = dp(12);
+        host.addView(fab3d, flp);
+        fab3d.setOnClickListener(v -> openCar3D());
+
+        setContentView(host);
+        // [v0.3.12] 系统栏避让：车机导航栏隐藏失败时按 insets 让内容避开，保证全部可见
+        applySystemBarInsets(host);
     }
 
     /** 网格化桌面：纵向滚动 + 自适应流式网格 */
@@ -239,7 +267,8 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         action("airraw1", "模式·制冷", () -> vc.setAirMode(1));
         action("airraw2", "模式·制热", () -> vc.setAirMode(2));
         action("airraw3", "模式·制冷3", () -> vc.setAirMode(3));
-        actionRun("acpage", "空调界面", vc::openAcPage);
+        // [v0.3.12] P0 修复：ADB 写入必须走子线程（actionRun 主线程同步执行会抛 NetworkOnMainThreadException）
+        action("acpage", "空调界面", vc::openAcPage);
 
         // [FIX-20260928] 阅读灯：开/关合并为单按钮 + 状态点；通道改 handMessage（见 VehicleController.readingLight）
         group("📖 阅读灯");
@@ -248,12 +277,13 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         pairTile("read_rl", "后左阅读灯", () -> vc.readingLight("后左阅读灯", true), () -> vc.readingLight("后左阅读灯", false));
         pairTile("read_rr", "后右阅读灯", () -> vc.readingLight("后右阅读灯", true), () -> vc.readingLight("后右阅读灯", false));
 
-        // 车窗（点击开滑杆）
+        // [v0.3.12] 车窗：主界面直显四窗内嵌滑块（拖动即调节、松手下发），不再弹窗
         group("🪟 车窗");
-        for (int i = 0; i < 4; i++) {
-            tile("win_" + i, TileView.Type.ACTION, WIN_TITLES[i], 1, 1)
-                    .setListener(press(this::openWindowSlider));
-        }
+        windowSlider = new WindowSliderView(this);
+        windowSlider.setListener((voiceName, percent) ->
+                runCommand(voiceName + "→" + percent + "%",
+                        () -> vc.setWindowByName(voiceName, percent)));
+        flow.addCell(windowSlider, 4, 2);
 
         // [FIX-20260928] 儿童锁：开/关合并 + 状态点
         group("👶 儿童锁");
@@ -267,8 +297,9 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         pairTile("pos", "示廓灯", vc::positionLightOn, vc::positionLightOff);
         pairTile("ffog", "前雾灯", vc::frontFogOn, vc::frontFogOff);
         pairTile("fog", "后雾灯", vc::fogLightOn, vc::fogLightOff);
-        actionRun("auto", "自动灯光", vc::autoLights);
-        actionRun("closeall", "关闭全部", vc::closeAllLights);
+        // [v0.3.12] P0 修复：actionRun→action（子线程执行，见 ISSUES-20261005 P0-2）
+        action("auto", "自动灯光", vc::autoLights);
+        action("closeall", "关闭全部", vc::closeAllLights);
 
         // 连接 · 环境 · 场景
         group("📶 连接 · 环境 · 场景");
@@ -280,15 +311,16 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         tile("airstatus", TileView.Type.VALUE, "空调模式", 1, 1);
         toggle("sentinel", "哨兵模式", "sentinel");
         toggle("speechspeak", "语音播报", "speechspeak");
-        actionRun("scene_rest", "⚠小憩模式", () -> vc.scene("REST_MODE"));
-        actionRun("scene_camp", "⚠露营模式", () -> vc.scene("CAMPING_MODE"));
-        actionRun("scene_save", "⚠省电模式", () -> vc.scene("POWER_SAVE_MODE"));
-        actionRun("scene_guard", "⚠守护模式", () -> vc.scene("GUARD_MODE"));
-        actionRun("scene_senti", "⚠哨兵(广播)", () -> vc.scene("SENTINEL_MODE"));
+        // [v0.3.12] P0 修复：场景模式 actionRun→action（子线程执行，见 ISSUES-20261005 P0-1）
+        action("scene_rest", "⚠小憩模式", () -> vc.scene("REST_MODE"));
+        action("scene_camp", "⚠露营模式", () -> vc.scene("CAMPING_MODE"));
+        action("scene_save", "⚠省电模式", () -> vc.scene("POWER_SAVE_MODE"));
+        action("scene_guard", "⚠守护模式", () -> vc.scene("GUARD_MODE"));
+        action("scene_senti", "⚠哨兵(广播)", () -> vc.scene("SENTINEL_MODE"));
         // [FIX-20260928] 行人警示音 / 后视镜折叠：合并开/关 + 状态点；通道改 handMessage 语音家族
         pairTile("ped_pair", "行人警示音", () -> vc.pedestrianAlert(true), () -> vc.pedestrianAlert(false));
         pairTile("mirror_fold", "后视镜折叠", () -> vc.mirrorFold(true), () -> vc.mirrorFold(false));
-        actionRun("force_charge", "⚠强制充电",
+        action("force_charge", "⚠强制充电",
                 () -> vc.shellSetProp("leap.energy.force_charge", "1"));
 
         // [FIX-20260928] 后备箱/车门锁：开/关合并 + 状态点（门盖快照回写）
@@ -442,10 +474,14 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         powerChip = chip("电量 --", false, v -> showPage(0));
         timeChip = chip("时间 --", false, v -> showPage(0));
         TextView voiceChip = chip("🎤 释放", true, v -> doReleaseVoice());
+        TextView invokeChip = chip("🎙 唤起", true, v -> doInvokeVoice());
+        TextView exitVoiceChip = chip("✕ 退出", true, v -> doExitVoice());
         TextView signalChip = chip("📊 信号", true, v -> showPage(1));
         TextView controlChip = chip("🎛 车控", true, v -> showPage(2));
         webChip = chip("🌐 Web: 启动中…", true, v -> showWebInfoDialog());
         TextView themeChip = chip("🎨 主题", true, v -> toggleTheme());   // [FIX-20260928] 主题切换入口
+        TextView assistChip = chip("🧩 辅助", true, v -> startActivity(
+                new Intent(this, com.c11.cartool.assist.AssistActivity.class)));
 
         bar.addView(adbChip);
         bar.addView(gearChip);
@@ -459,6 +495,7 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         bar.addView(controlChip);
         bar.addView(webChip);
         bar.addView(themeChip);
+        bar.addView(assistChip);
         return bar;
     }
 
@@ -566,13 +603,7 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         }
     }
 
-    private void openWindowSlider() {
-        WindowCardView.Listener wl = (voiceName, percent) ->
-                runCommand(voiceName + "→" + percent + "%",
-                        () -> vc.setWindowByName(voiceName, percent));
-        int[] pct = latest != null ? latest.windowPct : null;
-        WindowSliderDialog.show(this, WindowCardView.voiceNames(), pct, wl);
-    }
+    // [v0.3.12] 车窗内嵌滑块已直显主界面，弹窗入口移除（WindowSliderDialog 保留供参考）
 
     // ═══════════════════════════════════════════════
     //  命令执行（后台 + Toast）
@@ -636,6 +667,18 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
                 Toast.LENGTH_SHORT).show();
     }
 
+    private void doInvokeVoice() {
+        boolean ok = vc.invokeVoice();
+        Toast.makeText(this, ok ? "已唤起小零" : "唤起失败（见日志）",
+                Toast.LENGTH_SHORT).show();
+    }
+
+    private void doExitVoice() {
+        boolean ok = vc.exitVoice();
+        Toast.makeText(this, ok ? "已退出语音交互" : "退出失败（见日志）",
+                Toast.LENGTH_SHORT).show();
+    }
+
     // ═══════════════════════════════════════════════
     //  Web 服务
     // ═══════════════════════════════════════════════
@@ -668,6 +711,8 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
 
     @Override public void onSnapshot(DashboardSnapshot s) {
         latest = s;
+        // [v0.3.13] 3D 车模界面共用同一份快照（静态转发，不重复采集）
+        Car3DActivity.latest = s;
         applySnapshot(s);
     }
 
@@ -755,11 +800,9 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         setRawTile("ambient", s.extra.get("strCar1800"));
         setRawTile("airstatus", s.extra.get("strCarAirStatus"));
 
-        // 车窗标签
-        for (int i = 0; i < 4; i++) {
-            if (s.windowPct != null && s.windowPct[i] >= 0) {
-                t("win_" + i).setLabel(WIN_TITLES[i] + " " + s.windowPct[i] + "%");
-            }
+        // [v0.3.12] 车窗真实开度回写内嵌滑块（顺序 左前 右前 左后 右后）
+        if (s.windowPct != null && windowSlider != null) {
+            for (int i = 0; i < 4; i++) windowSlider.setPosition(i, s.windowPct[i]);
         }
 
         if (signalPage != null) signalPage.setRows(s.rows);
@@ -911,6 +954,57 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
                         | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                         | View.SYSTEM_UI_FLAG_FULLSCREEN
                         | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+    }
+
+    /**
+     * [v0.3.12] 系统栏避让：部分车机导航栏隐藏不生效（仅状态栏隐藏成功），
+     * 此时按 WindowInsets 给根布局加 padding，让内容避开系统栏、保证全部可见。
+     * 幂等：每次 focus/配置变化重复设置无副作用；rootView 未建（onCreate 早期）时跳过，
+     * buildUi 末尾会再调一次。
+     */
+    private void applySystemBarInsets(final View target) {
+        if (target == null) return;
+        target.setOnApplyWindowInsetsListener((v, insets) -> {
+            int top = insets.getSystemWindowInsetTop();
+            int bottom = insets.getSystemWindowInsetBottom();
+            if (top > 0 || bottom > 0) v.setPadding(0, top, 0, bottom);
+            return insets;
+        });
+        target.requestApplyInsets();
+    }
+
+    // [v0.3.13] 左滑手势：主界面向左快速滑动 → 打开 3D 车模第二界面
+    private GestureDetector swipeDetector;
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        if (swipeDetector == null) {
+            swipeDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+                @Override
+                public boolean onFling(MotionEvent e1, MotionEvent e2, float vx, float vy) {
+                    if (e1 == null || e2 == null) return false;
+                    float dx = e2.getX() - e1.getX();
+                    float dy = Math.abs(e2.getY() - e1.getY());
+                    if (Math.abs(dx) > dp(90) && Math.abs(dx) > dy * 1.5f && vx < -dp(40)) {
+                        openCar3D();
+                        return true;
+                    }
+                    return false;
+                }
+            });
+        }
+        swipeDetector.onTouchEvent(ev);
+        return super.dispatchTouchEvent(ev);
+    }
+
+    private void openCar3D() {
+        try {
+            startActivity(new Intent(this, Car3DActivity.class));
+            overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out);
+        } catch (Exception e) {
+            Logger.error("打开3D车模失败: " + e);
+            Toast.makeText(this, "打开 3D 车模失败", Toast.LENGTH_SHORT).show();
+        }
     }
 
     @Override

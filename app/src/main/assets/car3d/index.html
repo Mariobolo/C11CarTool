@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta http-equiv="pragma" content="no-cache">
+  <meta http-equiv="cache-control" content="no-cache">
+  <meta http-equiv="expires" content="0">
+  <title>零跑C16 - 资源内联版本（file协议测试）</title>
+  <meta name="description" content="一触即发">
+  
+  <script>
+    baseURL = "";
+  </script>
+  
+  <!-- SystemJS 模块加载器 -->
+  <script src="js/vendor/system.min.js"></script>
+  
+  <!-- 配置 SystemJS 使用 script 标签加载（兼容 file 协议） -->
+  <script>
+    System.config({
+      scriptLoad: true
+    });
+  </script>
+  
+  <!-- 交互脚本（普通脚本） -->
+  <script src="js/interaction.js"></script>
+  
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app"></div>
+  
+  <script>
+    console.log('[调试] 开始加载模块...');
+    
+    // 用 SystemJS 加载打包后的 System 格式模块（含内联资源）
+    System.import('./js/bundle-system-inline.js').then(function(module) {
+      console.log('[调试] ✅ 模块加载成功！');
+      console.log('模块导出:', module);
+      
+      // 检查全局对象
+      setTimeout(function() {
+        if (window.i && window.v) {
+          console.log('[调试] ✅ 3D车模初始化成功！window.i 和 window.v 已就绪');
+        } else {
+          console.log('[调试] ⚠️ 模块加载成功，但全局对象未就绪');
+        }
+      }, 2000);
+    }).catch(function(err) {
+      console.log('[调试] ❌ 模块加载失败: ' + err.message);
+      console.error('SystemJS 加载失败:', err);
+    });
+    
+    // 监听资源加载
+    var originalFetch = window.fetch;
+    window.fetch = function() {
+      console.log('[Fetch请求]', arguments[0]);
+      return originalFetch.apply(this, arguments);
+    };
+  </script>
+  <!-- C11CarTool v0.3.13: HUD 数据桥（车辆状态叠加层） -->
+  <script src="js/car_bridge.js"></script>
+</body>
+</html>

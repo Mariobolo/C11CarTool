@@ -34,10 +34,30 @@ public class SignalListPage extends LinearLayout {
     private List<SignalRow> allRows = new ArrayList<SignalRow>();
     private final Set<String> collapsed = new HashSet<String>();
 
-    public SignalListPage(Context ctx) {
+    public SignalListPage(Context ctx, final Runnable onBack) {
         super(ctx);
         setOrientation(VERTICAL);
         setBackgroundColor(DashboardTheme.BG);
+
+        // [v0.3.13] 界面内返回（不依赖硬件返回键）
+        LinearLayout header = new LinearLayout(ctx);
+        header.setOrientation(HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setBackgroundColor(DashboardTheme.SURFACE);
+        TextView back = new TextView(ctx);
+        back.setText("← 返回");
+        back.setTextColor(DashboardTheme.BLUE);
+        back.setTextSize(15);
+        back.setPadding(dp(14), dp(10), dp(14), dp(10));
+        back.setOnClickListener(v -> { if (onBack != null) onBack.run(); });
+        TextView title = new TextView(ctx);
+        title.setText("全车信号");
+        title.setTextColor(DashboardTheme.TEXT);
+        title.setTextSize(17);
+        title.setPadding(dp(4), 0, 0, 0);
+        header.addView(back);
+        header.addView(title);
+        addView(header, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT));
 
         searchBox = new EditText(ctx);
         searchBox.setHint("搜索信号名 / 渠道 / 分组…");

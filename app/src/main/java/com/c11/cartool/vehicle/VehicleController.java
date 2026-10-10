@@ -284,30 +284,80 @@ public class VehicleController {
         return sendVoice("carControl", obj().put("operation", "OPEN").put("name", "360"));
     }
 
-    // ═══ 语音释放：释放语音助手对麦克风的占用（stopvr），便于其它应用录音 ═══
-    private static final String VOICE_RELEASE_PKG = "com.iflytek.cutefly.speechclient.hmi";
-    private static final String VOICE_RELEASE_CLS = "com.iflytek.auto.speechclient.sdk.SpeechClientService";
+    // ═══ 语音 vr 控制（SpeechClientService 管理麦克风/交互态）═══
+    //  startvr 唤起小零；stopvr 释放录音器（便于其它应用录音）；exitvr 结束交互；resumevr 恢复
+    private static final String VOICE_PKG = "com.iflytek.cutefly.speechclient.hmi";
+    private static final String VOICE_CLS = "com.iflytek.auto.speechclient.sdk.SpeechClientService";
 
-    public boolean releaseVoice() {
+    /**
+     * 向 SpeechClientService 发一条 vr 控制指令。
+     * 服务端 onStartCommand 只用 intent.hasExtra(key) 判断、不校验 extra 值类型，
+     * 故统一用 String extra（与官方 controlIflyView 一致），值传本应用包名标识来源。
+     */
+    private boolean controlVr(String vrKey) {
         try {
-            Log.i(TAG, "语音释放 stopvr");
+            Log.i(TAG, "语音 vr 控制: " + vrKey);
             if (Sh.isAdbConnected()) {
-                String cmd = "am startservice -n " + VOICE_RELEASE_PKG + "/" + VOICE_RELEASE_CLS
-                        + " --ez stopvr true";
+                String cmd = "am startservice -n " + VOICE_PKG + "/" + VOICE_CLS
+                        + " --es " + vrKey + " " + context.getPackageName();
                 Sh.Result r = Sh.run(cmd);
                 setLastResult(r);
                 Logger.cmd(cmd, r);
                 return r.exit == 0;
             } else {
                 Intent i = new Intent();
-                i.setComponent(new ComponentName(VOICE_RELEASE_PKG, VOICE_RELEASE_CLS));
-                i.putExtra("stopvr", true);
+                i.setComponent(new ComponentName(VOICE_PKG, VOICE_CLS));
+                i.putExtra(vrKey, context.getPackageName());
                 if (android.os.Build.VERSION.SDK_INT >= 26) context.startForegroundService(i);
                 else context.startService(i);
                 return true;
             }
         } catch (Exception e) {
-            Log.e(TAG, "语音释放失败: " + e.getMessage(), e);
+            Log.e(TAG, "语音 vr 控制失败 " + vrKey + ": " + e.getMessage(), e);
+            return false;
+        }
+    }
+
+    /** 唤起小零（进入语音交互态）。 */
+    public boolean invokeVoice() { return controlVr("startvr"); }
+
+    /** 释放小零对麦克风的占用（stopvr），便于其它应用录音。 */
+    public boolean releaseVoice() { return controlVr("stopvr"); }
+
+    /** 退出/结束小零当前语音交互（exitvr，关闭语音对话界面）。 */
+    public boolean exitVoice() { return controlVr("exitvr"); }
+
+    // ═══ TTS 文本播报（讯飞 TtsService，startService；参数经车友 MacroDroid 验证）═══
+    private static final String TTS_PKG = "com.iflytek.cutefly.speechclient.hmi";
+    private static final String TTS_CLS = "com.iflytek.autofly.voicecoreservice.tts.TtsService";
+
+    /** 让小零播报任意文本（ADB 走 startservice；无 ADB 时本地 startService 兜底）。 */
+    public boolean speak(String text) {
+        if (text == null || text.trim().isEmpty()) return false;
+        try {
+            if (Sh.isAdbConnected()) {
+                String cmd = "am startservice -n " + TTS_PKG + "/" + TTS_CLS
+                        + " --es operation PLAY --es text " + shellQuote(text)
+                        + " --es package leap --es priority high --es streamType 3"
+                        + " --es audioFocusDurationHint forever";
+                Sh.Result r = Sh.run(cmd);
+                setLastResult(r);
+                Logger.cmd(cmd, r);
+                return r.exit == 0;
+            }
+            Intent i = new Intent();
+            i.setComponent(new ComponentName(TTS_PKG, TTS_CLS));
+            i.putExtra("operation", "PLAY");
+            i.putExtra("text", text);
+            i.putExtra("package", "leap");
+            i.putExtra("priority", "high");
+            i.putExtra("streamType", "3");
+            i.putExtra("audioFocusDurationHint", "forever");
+            if (android.os.Build.VERSION.SDK_INT >= 26) context.startForegroundService(i);
+            else context.startService(i);
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "TTS 失败: " + e.getMessage(), e);
             return false;
         }
     }
