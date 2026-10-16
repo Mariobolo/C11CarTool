@@ -13,6 +13,7 @@ local.properties
 
 # OS
 Thumbs.db
+*sshknown_hosts*
 
 # Local-only working/audit docs (kept on disk, not published to GitHub)
 /FIXES-*.md
