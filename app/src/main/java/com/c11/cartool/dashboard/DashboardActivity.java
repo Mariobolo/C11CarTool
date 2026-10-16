@@ -29,6 +29,8 @@ import com.c11.cartool.Logger;
 import com.c11.cartool.Sh;
 import com.c11.cartool.WebPages;
 import com.c11.cartool.WebServer;
+import com.c11.cartool.media.MediaButtonReceiver;
+import com.c11.cartool.media.MediaHub;
 import com.c11.cartool.vehicle.VehicleController;
 
 import java.util.LinkedHashMap;
@@ -88,6 +90,10 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
     private ThemeManager themeManager;
     private LinearLayout rootView;
 
+    // [v0.3.18] 播放器切换 + 方控对接：MediaHub（MediaBrowser/MediaController）+ 媒体卡（网格 4×2）
+    private MediaHub mediaHub;
+    private MediaCardView mediaCard;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -108,7 +114,11 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         Logger.info("设备: " + android.os.Build.MODEL + "，Android " + android.os.Build.VERSION.RELEASE);
 
         themeManager = new ThemeManager(this);   // [FIX-20260928] 主题选择+持久化（原先有类无接线）
+        // [v0.3.18] 媒体中心：创建后立即注册方控转发（MediaButtonReceiver），卡片在 buildTiles 挂载
+        mediaHub = new MediaHub(this, null);
+        MediaButtonReceiver.setActiveHub(mediaHub);
         buildUi();
+        mediaHub.start();   // 连接已保存的播放器（若有）
         startWebAuto();
 
         Sh.setContext(this);
@@ -269,6 +279,26 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         action("airraw3", "模式·制冷3", () -> vc.setAirMode(3));
         // [v0.3.12] P0 修复：ADB 写入必须走子线程（actionRun 主线程同步执行会抛 NetworkOnMainThreadException）
         action("acpage", "空调界面", vc::openAcPage);
+
+        // [v0.3.18] 播放器切换 + 方控：媒体卡（选择播放器 / 封面 / 上一首·暂停·下一首），
+        // 引擎 MediaHub（MediaBrowser/MediaController），失败降级 shell 媒体按键 85/87/88
+        group("🎵 音乐");
+        mediaCard = new MediaCardView(this, mediaHub, new MediaCardView.Shell() {
+            @Override public void mediaKey(int keyCode) {
+                Sh.submitAsync(() -> Sh.run("input keyevent " + keyCode, 5000));
+            }
+
+            @Override public void launchPlayer(String pkg) {
+                try {
+                    Intent i = getPackageManager().getLaunchIntentForPackage(pkg);
+                    if (i != null) startActivity(i);
+                    else Logger.warn("媒体", "播放器无启动入口: " + pkg);
+                } catch (Exception e) {
+                    Logger.error("媒体", "启动播放器失败", e);
+                }
+            }
+        });
+        flow.addCell(mediaCard, 4, 2);
 
         // [FIX-20260928] 阅读灯：开/关合并为单按钮 + 状态点；通道改 handMessage（见 VehicleController.readingLight）
         group("📖 阅读灯");
@@ -713,6 +743,8 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         latest = s;
         // [v0.3.13] 3D 车模界面共用同一份快照（静态转发，不重复采集）
         Car3DActivity.latest = s;
+        // [v0.3.18] 每轮快照触发播放器自动识别（通知栏→前台应用，内部子线程+防抖，不阻塞主线程）
+        if (mediaHub != null) mediaHub.autoDetect();
         applySnapshot(s);
     }
 
@@ -1030,5 +1062,8 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         if (stateListener != null) Sh.removeStateListener(stateListener);
         if (repository != null) repository.stop();
         if (webServer != null) webServer.stop();
+        // [v0.3.18] 注销方控转发并释放媒体连接（避免静态引用泄漏）
+        MediaButtonReceiver.setActiveHub(null);
+        if (mediaHub != null) mediaHub.release();
     }
 }

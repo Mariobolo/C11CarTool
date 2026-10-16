@@ -42,6 +42,7 @@ public class MediaCardView extends FrameLayout implements MediaHub.Listener {
         super(ctx);
         this.hub = h;
         this.shell = sh;
+        h.setListener(this);   // [v0.3.18] 卡片即元数据/自动识别监听者（hub 由 Activity 先行创建）
         setBackground(Glass.bg(ctx, 14, Glass.NORMAL));
         setPadding(dp(12), dp(10), dp(12), dp(10));
         build();
@@ -137,6 +138,18 @@ public class MediaCardView extends FrameLayout implements MediaHub.Listener {
         artistView.setText(artist == null || artist.isEmpty() ? "--" : artist);
         if (cover != null) coverView.setImageBitmap(cover);
         playPauseBtn.setText(playing ? "⏸" : "▶");
+    }
+
+    /** [v0.3.18] 自动识别到播放器后更新名字（标注识别通道），不覆盖用户手动选择显示。 */
+    @Override public void onPlayerDetected(String pkg, String via) {
+        String name = pkg;
+        try {
+            android.content.pm.ApplicationInfo ai =
+                    getContext().getPackageManager().getApplicationInfo(pkg, 0);
+            CharSequence label = getContext().getPackageManager().getApplicationLabel(ai);
+            if (label != null && label.length() > 0) name = label.toString();
+        } catch (Exception ignored) {}
+        playerName.setText(name + "(" + via + ")");
     }
 
     private TextView ctrlButton(String s) {
