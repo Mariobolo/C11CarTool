@@ -1564,6 +1564,9 @@ public class MainActivity extends Activity {
         // [FIX] 生命周期清理：取消进行中的车控实验，防止后台线程继续驱动 UI 弹框
         CarControlExperiment.RunHandle r = experimentRun;
         if (r != null) r.cancel();
+        // [v0.3.19] Logger 回调显式注销（v0.3.11 已改 WeakReference，此处双保险防未来改回强引用）
+        Logger.setCallback(null);
+        Logger.setPerfCallback(null);
         super.onDestroy();
     }
 

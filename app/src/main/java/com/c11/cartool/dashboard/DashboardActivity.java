@@ -133,6 +133,17 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         Sh.startKeepAlive();
         Sh.autoConnectLocal();
 
+        // [v0.3.19] 双指手势层：左滑暂开 3D（v0.3.20 改接分屏），右滑预留日志
+        gestureHub = new GestureHub(this, new GestureHub.Listener() {
+            @Override public void onTwoFingerSwipeLeft(float vx) {
+                Logger.info("手势", "双指左滑 → 打开3D（v0.3.20 改接分屏）");
+                openCar3D();
+            }
+            @Override public void onTwoFingerSwipeRight(float vx) {
+                Logger.info("手势", "双指右滑（v0.3.20 接分屏返回）");
+            }
+        });
+
         repository = new DashboardRepository(ui, this);
         repository.start();
     }
@@ -1007,6 +1018,8 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
 
     // [v0.3.13] 左滑手势：主界面向左快速滑动 → 打开 3D 车模第二界面
     private GestureDetector swipeDetector;
+    // [v0.3.19] 双指手势层（分屏/容器手势，与单指 3D 共存；左滑暂开 3D，v0.3.20 改接分屏）
+    private GestureHub gestureHub;
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
@@ -1025,6 +1038,8 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
                 }
             });
         }
+        // [v0.3.19] 双指手势优先消费；未消费再走单指 3D 手势
+        if (gestureHub != null && gestureHub.onTouch(ev)) return true;
         swipeDetector.onTouchEvent(ev);
         return super.dispatchTouchEvent(ev);
     }
