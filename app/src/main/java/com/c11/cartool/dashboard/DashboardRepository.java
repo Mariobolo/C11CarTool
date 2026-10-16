@@ -373,7 +373,9 @@ public class DashboardRepository {
         snap.batterySoc = intOf(xml(r, "figure"), intOf(event(r, 3162), -1), -1);
         snap.voltage = floatOf(event(r, 3130), -1);
         snap.current = floatOf(event(r, 3131), -1);
-        snap.speedKmh = intOf(xml(r, "speed"), intOf(event(r, 1108), -1), -1);
+        // [v0.3.17] 车速取权威 ESCI_VEHICLESPEED(11166)，XML speed 兜底；
+        // 1108 实为油门踏板位置（车友CAN-Probe信号表），不再兜底车速
+        snap.speedKmh = intOf(event(r, 11166), intOf(xml(r, "speed"), -1), -1);
         snap.outsideTemp = intOf(event(r, 33110), -1);
 
         String g = xml(r, "gear");

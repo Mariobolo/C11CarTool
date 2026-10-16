@@ -74,9 +74,13 @@ public final class LogcatVehicleSource {
 
         // 档位（管家配置验证：1=R,2=N,3=D；P 可能为 0，存疑不臆造）
         enu(1110, "档位", G_DRIVE, enums(1, "R", 2, "N", 3, "D"));
-        num(1108, "车速", "km/h", G_DRIVE);
-        // 制动踏板：实测为连续开度值（如 34.0），非早期规范猜测的 0/1/2 枚举
-        num(11166, "制动踏板开度", "%", G_DRIVE);
+        // [v0.3.17][车友CAN-Probe信号表] 修正：1108=VCU_THROTTLEPOSITION（油门踏板位置）、
+        // 11166=ESCI_VEHICLESPEED（车速）。此前两映射颠倒（旧日志规范误判为车速/制动踏板）。
+        num(1108, "油门踏板位置", "%", G_DRIVE);
+        num(11166, "车速", "km/h", G_DRIVE);
+        // [v0.3.17] 新增限速（VCU_SPEEDLIMITEDSTS/VALUE，车友CAN-Probe signals.json）
+        num(1145, "限速状态", "-", G_DRIVE);
+        num(1148, "限速值", "km/h", G_DRIVE);
         enu(11201, "驾驶模式", G_DRIVE, enums(1, "舒适", 4, "运动", 6, "自定义"));
 
         // 车门（管家配置验证，已纠正早期错误映射）
@@ -99,6 +103,15 @@ public final class LogcatVehicleSource {
 
         // 灯光
         enu(3102, "转向灯状态", G_LIGHT, enums(0, "关", 5, "闪烁"));
+        // [v0.3.17] 转向灯权威映射（车友CAN-Probe signals.json）：
+        // BBCM_LEFT_STEERLAMP1-3=38697-38699 / BBCM_RIGHT_STEERLAMP1-3=38700-38702
+        enu(38697, "左转向灯", G_LIGHT, enums(0, "关", 1, "开"));
+        enu(38698, "左转向灯2", G_LIGHT, enums(0, "关", 1, "开"));
+        enu(38699, "左转向灯3", G_LIGHT, enums(0, "关", 1, "开"));
+        enu(38700, "右转向灯", G_LIGHT, enums(0, "关", 1, "开"));
+        enu(38701, "右转向灯2", G_LIGHT, enums(0, "关", 1, "开"));
+        enu(38702, "右转向灯3", G_LIGHT, enums(0, "关", 1, "开"));
+        enu(9108, "双闪开关", G_LIGHT, enums(0, "关", 1, "开"));
         enu(9121, "制动灯", G_LIGHT, enums(0, "关", 1, "开"));
         enu(14130, "刹车灯", G_LIGHT, enums(0, "关", 1, "开"));
         enu(1716, "大灯总状态", G_LIGHT, enums(0, "关", 1, "开"));
