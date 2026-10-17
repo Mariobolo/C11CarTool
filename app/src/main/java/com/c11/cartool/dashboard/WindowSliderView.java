@@ -39,7 +39,7 @@ public final class WindowSliderView extends LinearLayout {
 
             TextView name = new TextView(context);
             name.setText(names[i]);
-            name.setTextColor(0xFFE5E7EB);
+            name.setTextColor(DashboardTheme.TEXT);
             name.setTextSize(GridDimens.SP_LABEL);
             row.addView(name, new LinearLayout.LayoutParams(
                     dp(64), LayoutParams.WRAP_CONTENT));
@@ -50,7 +50,7 @@ public final class WindowSliderView extends LinearLayout {
 
             TextView val = new TextView(context);
             val.setText("--");
-            val.setTextColor(0xFF22D3EE);
+            val.setTextColor(DashboardTheme.CYAN);
             val.setTextSize(GridDimens.SP_STEP_VAL);
             val.setGravity(Gravity.CENTER);
             bars[i] = bar;
@@ -73,8 +73,9 @@ public final class WindowSliderView extends LinearLayout {
                     LayoutParams.WRAP_CONTENT, 1f));
             row.addView(val, new LinearLayout.LayoutParams(
                     dp(52), LayoutParams.WRAP_CONTENT));
+            // [v0.3.20] 行高 44→64dp：SeekBar 触摸目标达标（车窗开度调节）
             addView(row, new LinearLayout.LayoutParams(
-                    LayoutParams.MATCH_PARENT, dp(44)));
+                    LayoutParams.MATCH_PARENT, dp(64)));
         }
     }
 

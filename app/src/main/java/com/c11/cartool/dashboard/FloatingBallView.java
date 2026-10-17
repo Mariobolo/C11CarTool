@@ -58,7 +58,7 @@ public class FloatingBallView extends View {
         ringPaint.setStyle(Paint.Style.STROKE);
         ringPaint.setStrokeWidth(Math.max(1f, ctx.getResources().getDisplayMetrics().density));
         ringPaint.setColor(0x66FFFFFF);
-        textPaint.setColor(0xFFE4E7EB);
+        textPaint.setColor(DashboardTheme.TEXT);
         textPaint.setTextAlign(Paint.Align.CENTER);
         textPaint.setTextSize(Math.round(30 * ctx.getResources().getDisplayMetrics().density));
         textPaint.setFakeBoldText(true);

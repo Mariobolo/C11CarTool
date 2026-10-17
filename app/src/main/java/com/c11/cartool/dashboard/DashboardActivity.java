@@ -180,24 +180,21 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         content.addView(pageSwitcher, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
         content.addView(buildDock(), new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(52)));
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(72)));   // [v0.3.20] 52→72dp 触摸目标达标
 
         // [v0.3.13] 外层 FrameLayout：右侧悬浮「3D」入口（车模第二界面）
         FrameLayout host = new FrameLayout(this);
         host.addView(content, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
+        // [v0.3.20] 3D 悬浮球：56→72dp 触摸达标；自绘改走 Glass 统一玻璃参数
         TextView fab3d = new TextView(this);
         fab3d.setText("3D");
-        fab3d.setTextColor(0xFFE4E4E7);
-        fab3d.setTextSize(18);
+        fab3d.setTextColor(DashboardTheme.TEXT);
+        fab3d.setTextSize(20);
         fab3d.setGravity(Gravity.CENTER);
-        android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
-        gd.setColor(0xCC1A1D27);
-        gd.setCornerRadius(dp(28));
-        gd.setStroke(dp(1), 0x66FFFFFF);
-        fab3d.setBackground(gd);
-        FrameLayout.LayoutParams flp = new FrameLayout.LayoutParams(dp(56), dp(56),
+        fab3d.setBackground(Glass.bg(this, 36, Glass.NORMAL));
+        FrameLayout.LayoutParams flp = new FrameLayout.LayoutParams(dp(72), dp(72),
                 Gravity.END | Gravity.CENTER_VERTICAL);
         flp.rightMargin = dp(12);
         host.addView(fab3d, flp);
@@ -506,7 +503,7 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setBackgroundColor(0x990A0F1C);
+        bar.setBackgroundColor(DashboardTheme.BAR_BG);
         bar.setPadding(dp(10), 0, dp(10), 0);
 
         adbChip = chip("🔌 连接中…", true, v -> { showPage(0); Sh.autoConnectLocal(); });
@@ -514,15 +511,11 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         speedChip = chip("车速 --", false, v -> showPage(0));
         powerChip = chip("电量 --", false, v -> showPage(0));
         timeChip = chip("时间 --", false, v -> showPage(0));
+        // [v0.3.20] 操作类 chip 移入 Dock，状态条只留语音三键 + 信息 chip（Web 端口信息保留）
         TextView voiceChip = chip("🎤 释放", true, v -> doReleaseVoice());
         TextView invokeChip = chip("🎙 唤起", true, v -> doInvokeVoice());
         TextView exitVoiceChip = chip("✕ 退出", true, v -> doExitVoice());
-        TextView signalChip = chip("📊 信号", true, v -> showPage(1));
-        TextView controlChip = chip("🎛 车控", true, v -> showPage(2));
         webChip = chip("🌐 Web: 启动中…", true, v -> showWebInfoDialog());
-        TextView themeChip = chip("🎨 主题", true, v -> toggleTheme());   // [FIX-20260928] 主题切换入口
-        TextView assistChip = chip("🧩 辅助", true, v -> startActivity(
-                new Intent(this, com.c11.cartool.assist.AssistActivity.class)));
 
         bar.addView(adbChip);
         bar.addView(gearChip);
@@ -532,11 +525,9 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         View spacer = new View(this);
         bar.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1f));
         bar.addView(voiceChip);
-        bar.addView(signalChip);
-        bar.addView(controlChip);
+        bar.addView(invokeChip);
+        bar.addView(exitVoiceChip);
         bar.addView(webChip);
-        bar.addView(themeChip);
-        bar.addView(assistChip);
         return bar;
     }
 
@@ -565,17 +556,19 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         LinearLayout dock = new LinearLayout(this);
         dock.setOrientation(LinearLayout.HORIZONTAL);
         dock.setGravity(Gravity.CENTER);
-        dock.setBackgroundColor(0x990A0F1C);
+        dock.setBackgroundColor(DashboardTheme.BAR_BG);
 
-        String[] items = {"❄ 空调", "💧 除雾", "↻ 循环", "🎥 360", "📂 后备箱", "🔒 锁车", "🔓 解锁", "📱 扫码"};
+        // [v0.3.20] 13 项：原 8 常用 + 状态条操作移入（信号/车控/主题/辅助/Web）
+        String[] items = {"❄ 空调", "💧 除雾", "↻ 循环", "🎥 360", "📂 后备箱", "🔒 锁车",
+                "🔓 解锁", "📊 信号", "🎛 车控", "🎨 主题", "🧩 辅助", "📱 扫码", "🌐 Web"};
         for (int i = 0; i < items.length; i++) {
             final int idx = i;
             TextView b = new TextView(this);
             b.setText(items[i]);
             b.setTextColor(DashboardTheme.TEXT);
-            b.setTextSize(GridDimens.SP_CHIP);
+            b.setTextSize(GridDimens.SP_ACTION);   // [v0.3.20] 22sp，对齐车机次要字号目标
             b.setGravity(Gravity.CENTER);
-            b.setPadding(dp(8), dp(8), dp(8), dp(8));
+            b.setPadding(dp(6), dp(8), dp(6), dp(8));
             b.setOnClickListener(v -> onDock(idx));
             dock.addView(b, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f));
         }
@@ -591,7 +584,12 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
             case 4: runCommand("后备箱开", () -> vc.openTrunk()); break;
             case 5: runCommand("车门闭锁", () -> vc.lockCar()); break;
             case 6: runCommand("车门解锁", () -> vc.unlockCar()); break;
-            case 7: showWebInfoDialog(); break;
+            case 7: showPage(1); break;   // 信号
+            case 8: showPage(2); break;   // 车控
+            case 9: toggleTheme(); break; // 主题
+            case 10: startActivity(new Intent(this, com.c11.cartool.assist.AssistActivity.class)); break; // 辅助
+            case 11: showWebInfoDialog(); break; // 扫码
+            case 12: showWebInfoDialog(); break; // Web
             default: break;
         }
     }
@@ -680,7 +678,7 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         tv.setText(report);
         tv.setTextSize(11);
         tv.setTypeface(Typeface.MONOSPACE);
-        tv.setTextColor(0xFFE5E7EB);
+        tv.setTextColor(DashboardTheme.TEXT);
         sv.addView(tv);
         int pad = dp(12);
         sv.setPadding(pad, pad, pad, pad);

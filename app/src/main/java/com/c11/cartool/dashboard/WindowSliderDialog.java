@@ -33,7 +33,7 @@ public final class WindowSliderDialog {
 
             TextView name = new TextView(ctx);
             name.setText(names[i]);
-            name.setTextColor(0xFFE5E7EB);
+            name.setTextColor(DashboardTheme.TEXT);
             name.setTextSize(12);
             row.addView(name, new LinearLayout.LayoutParams(
                     dp(ctx, 70), LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -46,7 +46,7 @@ public final class WindowSliderDialog {
 
             TextView val = new TextView(ctx);
             val.setText(cur + "%");
-            val.setTextColor(0xFF22D3EE);
+            val.setTextColor(DashboardTheme.CYAN);
             val.setTextSize(12);
             val.setGravity(Gravity.CENTER);
             vals[i] = val;

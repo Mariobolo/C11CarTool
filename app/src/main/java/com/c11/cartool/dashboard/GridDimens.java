@@ -21,7 +21,7 @@ public final class GridDimens {
     public static final int SP_VALUE      = 38;   // 1×1 主数值（主要，≥32）
     public static final int SP_LABEL      = 17;   // 1×1 标签/单位（辅助）
     public static final int SP_STEP_VAL   = 26;   // 滑块当前值
-    public static final int SP_ACTION     = 18;   // 动作/开关文字
+    public static final int SP_ACTION     = 22;   // 动作/开关文字（[v0.3.20] 18→22，对齐车机次要 ≥24 目标）
     public static final int SP_GROUP      = 20;   // 分组标题
     public static final int SP_BADGE      = 13;   // 渠道角标
     public static final int SP_CHIP       = 18;   // 状态栏 / Dock

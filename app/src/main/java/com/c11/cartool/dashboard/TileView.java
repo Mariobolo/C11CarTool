@@ -110,7 +110,8 @@ public class TileView extends FrameLayout {
         valueRow.addView(unitView);
         root.addView(valueRow, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
-        subView = make(GridDimens.SP_LABEL, DashboardTheme.FAINT, false);
+        // [v0.3.20] subView=胎温等数据（非角标），FAINT(≈2.9:1)→DIM(≈4.6:1) 达标
+        subView = make(GridDimens.SP_LABEL, DashboardTheme.DIM, false);
         root.addView(subView);
     }
 
@@ -151,8 +152,8 @@ public class TileView extends FrameLayout {
         // SeekBar：填充剩余高度，进度蓝 / 滑块白，上下留白使触摸区 ≥48dp
         seekBar = new SeekBar(getContext());
         seekBar.setMax(100);
-        seekBar.setProgressTintList(ColorStateList.valueOf(0xFF3B82F6));
-        seekBar.setThumbTintList(ColorStateList.valueOf(0xFFFFFFFF));
+        seekBar.setProgressTintList(ColorStateList.valueOf(DashboardTheme.BLUE));
+        seekBar.setThumbTintList(ColorStateList.valueOf(DashboardTheme.PURE_WHITE));
         seekBar.setSplitTrack(false);
         seekBar.setEnabled(false);   // 真实值到达前禁用，避免在假数据上操作
         seekBar.setKeyProgressIncrement(1);

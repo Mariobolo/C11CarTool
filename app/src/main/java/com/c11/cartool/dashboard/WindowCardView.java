@@ -133,7 +133,7 @@ public class WindowCardView extends SpanCardView {
         GradientDrawable d = new GradientDrawable();
         d.setCornerRadius(dp(6));
         d.setColor(0x12FFFFFF);
-        d.setStroke(dp(1), 0x22FFFFFF);
+        d.setStroke(dp(1), DashboardTheme.STROKE_IDLE);
         tv.setBackground(d);
         return tv;
     }
@@ -167,7 +167,7 @@ public class WindowCardView extends SpanCardView {
     private void styleBtn(TextView btn, boolean active) {
         GradientDrawable d = (GradientDrawable) btn.getBackground();
         d.setColor(active ? 0x333B82F6 : 0x12FFFFFF);
-        d.setStroke(dp(1), active ? 0x663B82F6 : 0x22FFFFFF);
+        d.setStroke(dp(1), active ? DashboardTheme.STROKE_ACT : DashboardTheme.STROKE_IDLE);
         btn.setTextColor(active ? DashboardTheme.CYAN : DashboardTheme.DIM);
         btn.setTypeface(active ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
     }

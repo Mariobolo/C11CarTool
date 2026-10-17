@@ -16,9 +16,9 @@ import java.util.List;
  *   <li>早期推测、无硬件消费者的 leap.* 虚拟键已剔除（真机读写均空，历史见 reference/，不在字典伪装可用）。</li>
  * </ul>
  *
- * <p><b>兼容</b>：尚未迁移的工程模式 UI（MainActivity / WorkbenchTest）仍按 {@code String[]}
- * 访问，故由 {@link ParamDef#toRow()} 生成旧格式视图 {@link #PARAMS}（仅含 settings 条目，
- * logcat 只读信号不混入该视图）；新代码应直接遍历结构化的 {@link #ALL}。
+ * <p><b>兼容</b>：工程模式 MainActivity 已于 v0.3.20 删除；{@link ParamDef#toRow()} 生成的
+ * 旧格式视图 {@link #PARAMS}（仅含 settings 条目，logcat 只读信号不混入）保留供参数浏览页使用；
+ * 新代码应直接遍历结构化的 {@link #ALL}。
  */
 public final class VehicleParams {
 

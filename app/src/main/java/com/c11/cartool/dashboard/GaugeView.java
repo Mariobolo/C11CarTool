@@ -25,7 +25,7 @@ public class GaugeView extends FrameLayout {
     private float minV = 0;
     private float maxV = 100;
     private String unit = "";
-    private int arcColor = 0xFF3B82F6;
+    private int arcColor = DashboardTheme.BLUE;
 
     public GaugeView(Context ctx, String title) {
         super(ctx);

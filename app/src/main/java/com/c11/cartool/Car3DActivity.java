@@ -1,4 +1,6 @@
 package com.c11.cartool;
+import com.c11.cartool.dashboard.DashboardTheme;
+
 
 import android.app.Activity;
 import android.graphics.Color;
@@ -92,7 +94,7 @@ public class Car3DActivity extends Activity {
         // 右上悬浮返回按钮（避开 HUD 右上角数据块，置顶居中偏右更安全）
         TextView back = new TextView(this);
         back.setText("✕");
-        back.setTextColor(0xFFE4E4E7);
+        back.setTextColor(DashboardTheme.TEXT);
         back.setTextSize(20);
         back.setGravity(Gravity.CENTER);
         back.setBackgroundColor(0xAA0A0E18);

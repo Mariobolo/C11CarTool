@@ -1,4 +1,6 @@
 package com.c11.cartool;
+import com.c11.cartool.dashboard.DashboardTheme;
+
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -39,18 +41,6 @@ import java.util.Locale;
  */
 public class AmapFixActivity extends Activity {
 
-    static final int C_BG = 0xFF0F1117;
-    static final int C_SURFACE = 0xFF1A1D27;
-    static final int C_CARD = 0xFF1E2330;
-    static final int C_TEXT = 0xFFE4E4E7;
-    static final int C_DIM = 0xFF8B8FA3;
-    static final int C_BLUE = 0xFF3B82F6;
-    static final int C_GREEN = 0xFF22C55E;
-    static final int C_RED = 0xFFEF4444;
-    static final int C_YELLOW = 0xFFEAB308;
-    static final int C_CYAN = 0xFF06B6D4;
-    static final int C_ORANGE = 0xFFF97316;
-    static final int C_PURPLE = 0xFFA855F7;
 
     private static final String AMAP_PKG = "com.leapmotor.autonavi";
 
@@ -80,24 +70,24 @@ public class AmapFixActivity extends Activity {
     private View buildUI() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(C_BG);
+        root.setBackgroundColor(DashboardTheme.BG);
         root.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         // 标题栏
         LinearLayout titleBar = new LinearLayout(this);
         titleBar.setOrientation(LinearLayout.HORIZONTAL);
-        titleBar.setBackgroundColor(C_SURFACE);
+        titleBar.setBackgroundColor(DashboardTheme.SURFACE);
         titleBar.setPadding(12, 10, 12, 10);
         titleBar.setGravity(Gravity.CENTER_VERTICAL);
 
-        Button backBtn = makeBtn("← 返回", C_DIM, v -> finish());
+        Button backBtn = makeBtn("← 返回", DashboardTheme.DIM, v -> finish());
         backBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         titleBar.addView(backBtn);
 
         TextView title = new TextView(this);
         title.setText("🗺️ 高德地图定位修复");
-        title.setTextColor(C_TEXT);
+        title.setTextColor(DashboardTheme.TEXT);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         title.setTypeface(null, Typeface.BOLD);
         title.setPadding(12, 0, 0, 0);
@@ -118,30 +108,30 @@ public class AmapFixActivity extends Activity {
         content.addView(makeSectionTitle("🔍 诊断信息"));
         diagView = new TextView(this);
         diagView.setText("正在诊断...");
-        diagView.setTextColor(C_DIM);
+        diagView.setTextColor(DashboardTheme.DIM);
         diagView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        diagView.setBackgroundColor(C_CARD);
+        diagView.setBackgroundColor(DashboardTheme.CARD);
         diagView.setPadding(10, 8, 10, 8);
         diagView.setMovementMethod(new ScrollingMovementMethod());
         content.addView(diagView);
 
         // 修复操作
         content.addView(makeSectionTitle("🛠️ 修复操作"));
-        content.addView(makeBtn("🔄 重新诊断", C_BLUE,
+        content.addView(makeBtn("🔄 重新诊断", DashboardTheme.BLUE,
                 v -> Sh.submitAsync(this::runDiagnosis)));
-        content.addView(makeBtn("✅ 一键修复（推送配置+授权+清数据+重启）", C_GREEN,
+        content.addView(makeBtn("✅ 一键修复（推送配置+授权+清数据+重启）", DashboardTheme.GREEN,
                 v -> { if (running.compareAndSet(false, true)) Sh.submitAsync(this::runOneClickFix); }));
-        content.addView(makeBtn("📄 仅推送 vsomeip.json 配置", C_CYAN,
+        content.addView(makeBtn("📄 仅推送 vsomeip.json 配置", DashboardTheme.CYAN,
                 v -> Sh.submitAsync(this::deployConfig)));
-        content.addView(makeBtn("🔑 仅授予定位权限", C_YELLOW,
+        content.addView(makeBtn("🔑 仅授予定位权限", DashboardTheme.YELLOW,
                 v -> Sh.submitAsync(this::grantPermissions)));
-        content.addView(makeBtn("🧹 仅清除地图数据", C_ORANGE,
+        content.addView(makeBtn("🧹 仅清除地图数据", DashboardTheme.ORANGE,
                 v -> Sh.submitAsync(() -> {
                     log("清除地图数据...");
                     Sh.Result r = Sh.run("pm clear " + AMAP_PKG);
                     log(r.ok() ? "✅ 数据已清除" : "❌ 清除失败: " + r.err);
                 })));
-        content.addView(makeBtn("🚀 重启高德地图", C_PURPLE,
+        content.addView(makeBtn("🚀 重启高德地图", DashboardTheme.PURPLE,
                 v -> Sh.submitAsync(() -> {
                     log("重启高德地图...");
                     Sh.run("am force-stop " + AMAP_PKG);
@@ -152,9 +142,9 @@ public class AmapFixActivity extends Activity {
 
         // 日志工具
         content.addView(makeSectionTitle("📝 日志工具"));
-        content.addView(makeBtn("📋 抓取 vsomeip/定位日志 (10秒)", C_BLUE,
+        content.addView(makeBtn("📋 抓取 vsomeip/定位日志 (10秒)", DashboardTheme.BLUE,
                 v -> Sh.submitAsync(this::captureLogs)));
-        content.addView(makeBtn("🗑️ 清空操作日志", C_DIM,
+        content.addView(makeBtn("🗑️ 清空操作日志", DashboardTheme.DIM,
                 v -> logView.setText("")));
 
         // 操作日志
@@ -163,9 +153,9 @@ public class AmapFixActivity extends Activity {
         logScroll.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 400));
         logView = new TextView(this);
-        logView.setTextColor(C_TEXT);
+        logView.setTextColor(DashboardTheme.TEXT);
         logView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
-        logView.setBackgroundColor(C_CARD);
+        logView.setBackgroundColor(DashboardTheme.CARD);
         logView.setPadding(10, 8, 10, 8);
         logView.setMovementMethod(new ScrollingMovementMethod());
         logScroll.addView(logView);
@@ -398,7 +388,7 @@ public class AmapFixActivity extends Activity {
     private TextView makeSectionTitle(String text) {
         TextView tv = new TextView(this);
         tv.setText(text);
-        tv.setTextColor(C_CYAN);
+        tv.setTextColor(DashboardTheme.CYAN);
         tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         tv.setTypeface(null, Typeface.BOLD);
         tv.setPadding(0, 12, 0, 6);

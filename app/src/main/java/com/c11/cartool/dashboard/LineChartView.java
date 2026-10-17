@@ -31,7 +31,7 @@ public class LineChartView extends FrameLayout {
     private final ChartSurface surface;
     private final TextView nowView;
 
-    private int lineColor = 0xFF3B82F6;
+    private int lineColor = DashboardTheme.BLUE;
     private float fixedMin = Float.NaN;
     private float fixedMax = Float.NaN;
     private String unit = "";
@@ -166,7 +166,7 @@ public class LineChartView extends FrameLayout {
             float cy = h - (at(last) - min) / (max - min) * h;
             dotPaint.setColor(lineColor);
             canvas.drawCircle(lastX, cy, dp(5), dotPaint);
-            dotPaint.setColor(0xFFFFFFFF);
+            dotPaint.setColor(DashboardTheme.PURE_WHITE);
             canvas.drawCircle(lastX, cy, dp(2.5f), dotPaint);
         }
     }

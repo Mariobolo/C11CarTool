@@ -71,7 +71,7 @@ public class MediaCardView extends FrameLayout implements MediaHub.Listener {
         LinearLayout mid = new LinearLayout(getContext());
         mid.setGravity(Gravity.CENTER_VERTICAL);
         coverView = new ImageView(getContext());
-        coverView.setBackgroundColor(0x22FFFFFF);
+        coverView.setBackgroundColor(DashboardTheme.PLACEHOLDER);
         LinearLayout.LayoutParams clp =
                 new LinearLayout.LayoutParams(dp(64), dp(64));
         clp.rightMargin = dp(12);
@@ -112,7 +112,7 @@ public class MediaCardView extends FrameLayout implements MediaHub.Listener {
 
     private LinearLayout.LayoutParams ctrlLp(float weight) {
         LinearLayout.LayoutParams lp =
-                new LinearLayout.LayoutParams(0, dp(64), weight);
+                new LinearLayout.LayoutParams(0, dp(72), weight);   // [v0.3.20] 64→72dp 触摸目标达标
         lp.setMargins(dp(4), 0, dp(4), 0);
         return lp;
     }
