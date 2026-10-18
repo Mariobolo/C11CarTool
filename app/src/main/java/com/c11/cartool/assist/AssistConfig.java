@@ -59,4 +59,8 @@ public final class AssistConfig {
     // ── 转向灯 360 视觉辅助 ──
     public boolean turnSignal360()       { return sp.getBoolean("turn360", false); }
     public void setTurnSignal360(boolean v){ sp.edit().putBoolean("turn360", v).apply(); }
+
+    // ── ADB 授权弹窗自动确认（无障碍点击“始终允许”，车机重启后不再手动点）──
+    public boolean adbAuthAuto()         { return sp.getBoolean("adb_auth_auto", false); }
+    public void setAdbAuthAuto(boolean v){ sp.edit().putBoolean("adb_auth_auto", v).apply(); }
 }

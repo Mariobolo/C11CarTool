@@ -92,6 +92,8 @@ public class AssistActivity extends Activity {
                 cfg.adbAuto(), cfg::setAdbAuto));
         s.addView(switchRow("同时启动 Shizuku（intent 方式）",
                 cfg.shizuku(), cfg::setShizuku));
+        s.addView(switchRow("ADB 授权弹窗自动确认（自动点“始终允许”，重启不再手动授权）",
+                cfg.adbAuthAuto(), cfg::setAdbAuthAuto));
         accessibilityState = new TextView(this);
         accessibilityState.setPadding(0, dp(8), 0, dp(8));
         s.addView(accessibilityState);

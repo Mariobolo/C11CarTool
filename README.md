@@ -52,6 +52,7 @@ App 启动后自动开启 Web 服务，弹窗显示地址与二维码。手机�
 | v0.3.17 | 【信号表修正】依据车友 CAN-Probe `signals.json`（2534 信号全集）修正 eventId 映射：**1108=油门踏板位置(VCU_THROTTLEPOSITION)、11166=车速(ESCI_VEHICLESPEED)**（旧日志规范两映射颠倒）；新增**转向灯** BBCM_LEFT/RIGHT_STEERLAMP1-3（38697-38702）、**限速** VCU_SPEEDLIMITEDSTS/VALUE（1145/1148）、双闪开关（9108）；仪表盘车速改取权威 11166 |
 | v0.3.18 | 【播放器切换 + 方控对接】接入既有 media 三件套（MediaHub 引擎 + 媒体卡 + MediaButtonReceiver 方控转发）：主界面新增「🎵 音乐」媒体卡（4×2，玻璃卡），支持从已装应用列表选择播放器、封面/标题/艺术家展示、上一首/暂停/下一首；新增**播放器自动识别**双通道（通知栏媒体通知优先、前台应用兜底，10s 防抖，ADB 子线程不卡主线程），识别即自动接入；控制失败自动降级 shell 媒体键（85/87/88）+ 一键拉起播放器；onDestroy 注销方控转发防静态泄漏 |
 | v0.3.19 | 【手势层 + 泄漏加固】新增车机手势层 `GestureHub`（双指水平滑动识别，水平主导防滚动冲突，与单指 3D 手势共存；双指左滑暂开 3D，v0.3.20 改接分屏）+ 悬浮返回球组件 `FloatingBallView`（≥76dp 玻璃球、可拖动吸附侧边、点击回调，供分屏/容器页复用）；Logger 回调显式注销加固（v0.3.11 已改 WeakReference，onDestroy 双保险） |
+| v0.3.22 | 【ADB 授权自动确认】无障碍服务识别 ADB 授权弹窗（systemui/settings 的 AdbAuthorize/UsbConfirm 类，实车 logcat 标定），自动点「始终允许/允许」；辅助页新增开关（默认关）。PC 端 adbkey 固定（2026-10-05 后未变），问题定位在车机 adb_keys 未记住/被重置，软件侧兜底先行 |
 | v0.3.21 | 【SOH 占位 + 摄像头预览】主界面新增「电池健康」瓦片（通道 UDS 0x722 DID 2201F2 / DoIP 13400，SOME/IP 并列，待实车标定，不放假数据，副行标注来源）；新增 FCT 摄像头预览页 `CamPreviewActivity`（lp_around 反射客户端：AIDL 14 方法全签名 + 事务码取自 FCT 反编译，`addRender→updateRenderArea→updateRelativeLayer(surfaceHandle)→showRender` + 2s 心跳；Parcel 直发 + 反射 AIDL 双模式，视角/服务名按钮供实车标定；Android 9 hidden API 豁免 + 解限） |
 | v0.3.20 | 【设计整改】视觉常量唯一来源：88 处硬编码色 / 65 处 dp 统一到 `GridDimens` + `DashboardTheme`（新增功能色组 / 浅色系 / 组件级常量，AmapFixActivity 主题副本归组）；触摸目标达标：Dock 52→72dp 并扩为 13 项（操作类从状态条移入 Dock，状态条只留语音三键 + 信息 chip）、3D 悬浮球 56→72dp 改走 `Glass`、媒体卡控制钮 64→72dp、车窗滑条行高 44→64dp、动作文字 18→22sp；胎温副行 FAINT→DIM（对比度 2.9→4.6:1）；删除工程模式 `MainActivity`（信号 / 车控 Dashboard 已有替代，诊断 / 日志导出已平铺主界面） |
 
@@ -77,6 +78,7 @@ App 启动后自动开启 Web 服务，弹窗显示地址与二维码。手机�
 5. 回传：App 导出日志、adb logcat、Web 截图、wlan0 IP、标定结果。
 6. 【v0.3.18 音乐】媒体卡显示封面/标题/艺术家；点卡选播放器后能控制（或失败降级 shell 键生效）；自动识别日志（MediaHub「自动识别播放器[通知栏/前台应用]」）；方控按键经卡片按钮同等生效。
 7. 【v0.3.19 手势】双指水平左滑触发（日志「双指左滑」+ 打开 3D）；双指右滑仅日志；双指滑动不误触纵向滚动与单指 3D 手势。
+6. 【v0.3.22 上机验证】辅助页开启「ADB 授权弹窗自动确认」后，重启车机/重新 adb connect：弹窗出现时 logcat(C11Assist) 有"检测到 ADB 授权弹窗"且按钮被自动点击（始终允许→允许）；观察 adb_keys 是否写入（需 shell 读 /data/misc/adb/adb_keys）；记录弹窗包名/类名以收紧识别规则。
 7. 【v0.3.21 上机验证】SOH 瓦片显示 "--"（不放假数据，副行"待标定·UDS/DoIP"）；辅助页进入摄像头预览页：连接服务（三个候选名逐一）、点视角按钮看画面是否切换（前/后/左/右/轮/3D/俯视，数值待实车标定）、logcat(CamPreview) 确认 AIDL/Parcel 是否成功、第三方鉴权结果（被拒则回退无障碍方案）；回归 v0.3.20 全清单。
 8. 【v0.3.20 设计】对照「🎨 设计规范」12 条：Dock 13 项 72dp 单排不拥挤且点按不误触、3D 悬浮球 ≥72dp、媒体卡按钮 ≥72dp、车窗滑条可拖且触摸区大、状态条语音三键 + 信息；深色 / 必应主题下文字对比达标（胎温等副行不再过暗）。
 

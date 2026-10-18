@@ -68,6 +68,19 @@ public class C11AssistService extends AccessibilityService {
         CharSequence pkg = event.getPackageName();
         CharSequence cls = event.getClassName();
         if (pkg == null || cls == null) return;
+
+        // [v0.3.22] ADB 授权弹窗自动确认：网络/USB 调试每次连接都会弹，
+        // 自动点“始终允许”让车机记住（弹窗包名/类名以实车 logcat 标定为准）。
+        if (new AssistConfig(this).adbAuthAuto() && isAuthDialog(pkg, cls)) {
+            Log.i(TAG, "检测到 ADB 授权弹窗: " + pkg + "/" + cls);
+            main.postDelayed(() -> doClickText("始终允许", ok -> {
+                if (ok) { Log.i(TAG, "授权自动确认 成功(始终允许)"); return; }
+                doClickText("允许", ok2 -> Log.i(TAG, "授权自动确认 "
+                        + (ok2 ? "成功(允许)" : "失败，未见按钮（弹窗类名待标定）")));
+            }), 800);
+            return;
+        }
+
         if (!DEMO_PKG.contentEquals(pkg) || !DEMO_ACT.contentEquals(cls)) return;
 
         // 仅当用户开启“开机自动 ADB”时自动点击
@@ -75,6 +88,18 @@ public class C11AssistService extends AccessibilityService {
         Log.i(TAG, "检测到 Demo 窗口，延迟点击 ADB 开关");
         main.postDelayed(() -> doClickText(ADB_TEXT, ok ->
                 Log.i(TAG, "ADB 开关自动点击 " + (ok ? "成功" : "失败"))), 500);
+    }
+
+    /** ADB 授权弹窗识别：systemui/settings 的 AdbAuthorize/UsbConfirm 类窗口（含零跑定制变体）。 */
+    private boolean isAuthDialog(CharSequence pkg, CharSequence cls) {
+        String p = pkg.toString().toLowerCase();
+        String c = cls.toString().toLowerCase();
+        boolean pkgHit = p.contains("systemui") || p.contains("settings")
+                || p.contains("dialog");
+        boolean clsHit = c.contains("adb") || c.contains("usb")
+                || c.contains("authorize") || c.contains("confirm");
+        Log.d(TAG, "auth dialog? pkg=" + p + " cls=" + c + " => " + (pkgHit && clsHit));
+        return pkgHit && clsHit;
     }
 
     // ── 界面动作实现（均在主线程）──
