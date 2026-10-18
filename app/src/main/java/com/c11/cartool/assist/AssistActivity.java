@@ -57,6 +57,7 @@ public class AssistActivity extends Activity {
         buildTurn360Section();
         buildTtsSection();
         buildVoiceSection();
+        buildCameraPreviewSection();
 
         setContentView(sv);
     }
@@ -168,6 +169,14 @@ public class AssistActivity extends Activity {
         row.addView(button("停止/释放", v -> toast(vc.releaseVoice(), "已释放麦克风")));
         row.addView(button("退出", v -> toast(vc.exitVoice(), "已退出语音")));
         s.addView(row);
+        root.addView(s);
+    }
+
+    // ── 7 摄像头预览（lp_around，实车标定） ──
+    private void buildCameraPreviewSection() {
+        LinearLayout s = section("七、摄像头预览（lp_around 反射客户端）");
+        s.addView(button("打开摄像头预览页", v ->
+                startActivity(new Intent(this, CamPreviewActivity.class))));
         root.addView(s);
     }
 

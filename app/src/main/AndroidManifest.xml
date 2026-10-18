@@ -59,6 +59,15 @@
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation" />
 
+        <!-- [v0.3.21] FCT 摄像头预览 demo 页（lp_around 反射客户端，实车标定用） -->
+        <activity
+            android:name=".assist.CamPreviewActivity"
+            android:exported="false"
+            android:label="C11 车控 · 摄像头预览"
+            android:screenOrientation="landscape"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation" />
+
         <!-- 功能辅助页面：开机自动化/多屏启动/限制解除/转向360/TTS/语音控制 -->
         <activity
             android:name=".assist.AssistActivity"

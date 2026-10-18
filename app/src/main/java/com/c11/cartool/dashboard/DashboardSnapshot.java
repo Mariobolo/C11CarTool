@@ -44,6 +44,8 @@ public class DashboardSnapshot {
 
     // ── logcat 解析（高频实时量） ──
     public volatile int  batterySoc   = -1;  // figure / eventId 3162 %
+    /** 电池健康度 SOH %（UDS 0x722 DID 2201F2 / SOME/IP，待实车标定），-1 无值 */
+    public volatile float soh         = -1;
     public volatile float voltage     = -1;  // eventId 3130 V
     public volatile float current     = -1;  // eventId 3131 A
     public volatile int  speedKmh     = -1;  // eventId 1108

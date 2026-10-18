@@ -232,6 +232,10 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
         // 行车信息
         group("🚗 行车信息");
         tile("soc", TileView.Type.VALUE, "电量", 1, 1);
+        // [v0.3.21] SOH 占位：通道 UDS 0x722 2201F2 / DoIP(13400) 待实车标定，不放假数据
+        TileView sohTile = tile("soh", TileView.Type.VALUE, "电池健康", 1, 1);
+        sohTile.setSub("待标定·UDS/DoIP");
+        sohTile.setChannel("UDS");
         tile("range", TileView.Type.VALUE, "续航", 1, 1);
         tile("volt", TileView.Type.VALUE, "电压", 1, 1);
         tile("current", TileView.Type.VALUE, "电流", 1, 1);

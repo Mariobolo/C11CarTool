@@ -17,6 +17,9 @@ public class VehicleDataModel {
     /** 电池电量百分比（0-100），待上机验证键名 */
     public volatile int batterySoc = -1;
 
+    /** 电池健康度 SOH（%），通道 UDS 0x722 DID 2201F2 / SOME/IP，待实车标定 */
+    public volatile float batterySoh = -1;
+
     /** 续航里程（km） */
     public volatile int rangeKm = -1;
 
@@ -159,6 +162,7 @@ public class VehicleDataModel {
      * 检查数据是否有效（非初始值）
      */
     public boolean isBatteryValid() { return batterySoc >= 0; }
+    public boolean isSohValid() { return batterySoh >= 0; }
     public boolean isRangeValid() { return rangeKm >= 0; }
     public boolean isSpeedValid() { return speedKmh >= 0; }
     public boolean isOdometerValid() { return odometerKm >= 0; }
@@ -171,6 +175,7 @@ public class VehicleDataModel {
      */
     public void reset() {
         batterySoc = -1;
+        batterySoh = -1;
         rangeKm = -1;
         speedKmh = 0;
         odometerKm = -1;
