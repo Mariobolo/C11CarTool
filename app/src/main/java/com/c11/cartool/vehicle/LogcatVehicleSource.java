@@ -102,7 +102,10 @@ public final class LogcatVehicleSource {
         num(21183, "左后车窗", "%", G_BODY);
 
         // 灯光
-        enu(3102, "转向灯状态", G_LIGHT, enums(0, "关", 5, "闪烁"));
+        // [v0.3.23][2026-10-19 实测 + signals.json 权威] 3102=BMS_BATTCHARGERSTS 充电器状态
+        // （实测值 0/5，枚举语义待标定，原样展示；旧标"转向灯状态"为错误映射，
+        //  转向灯权威源为 38697-38702 BBCM_STEERLAMP）
+        num(3102, "充电器状态", "", G_CHARGE);
         // [v0.3.17] 转向灯权威映射（车友CAN-Probe signals.json）：
         // BBCM_LEFT_STEERLAMP1-3=38697-38699 / BBCM_RIGHT_STEERLAMP1-3=38700-38702
         enu(38697, "左转向灯", G_LIGHT, enums(0, "关", 1, "开"));
