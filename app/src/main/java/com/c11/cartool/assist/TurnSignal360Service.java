@@ -44,12 +44,23 @@ public class TurnSignal360Service extends Service {
     private volatile boolean active = false;
     private boolean cameraOn = false;
     private final Runnable closeTask = this::closeCamera;
-    private final Runnable pollTask = new Runnable() {
-        @Override public void run() {
-            poll();
-            if (active) main.postDelayed(this, POLL_MS);
+
+    // [FIX-20261019] 轮询必须跑在专用后台线程：原实现挂在主线程 Handler 上，
+    // poll() 里的 Sh.run(logcat) 是 socket 网络 I/O，Android 9 主线程直接抛
+    // NetworkOnMainThreadException，导致转向灯信号读不到、且与 DashboardRepository
+    // 共用的 adbClient 流被扰乱（数据采集一并失败，UI 顶栏长期 --）。
+    private final Thread worker = new Thread(this::pollLoop, "turn360-poll");
+
+    private void pollLoop() {
+        while (active) {
+            try {
+                poll();
+                Thread.sleep(POLL_MS);
+            } catch (InterruptedException e) {
+                break;
+            }
         }
-    };
+    }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -58,8 +69,8 @@ public class TurnSignal360Service extends Service {
         startForegroundCompat();
         if (!active) {
             active = true;
-            main.post(pollTask);
-            Logger.info(TAG, "转向灯360辅助已启动");
+            worker.start();
+            Logger.info(TAG, "转向灯360辅助已启动（后台线程轮询）");
         }
         return START_STICKY;
     }
@@ -101,7 +112,7 @@ public class TurnSignal360Service extends Service {
     private void closeCamera() {
         if (!cameraOn) return;
         cameraOn = false;
-        Sh.run("input keyevent 4", 5000);   // 模拟返回键退出
+        Sh.submitAsync(() -> Sh.run("input keyevent 4", 5000));  // 模拟返回键退出（子线程，closeTask 在主线程）
         Logger.info(TAG, "转向关闭防抖结束 → 退出360");
     }
 
@@ -123,6 +134,7 @@ public class TurnSignal360Service extends Service {
     @Override
     public void onDestroy() {
         active = false;
+        worker.interrupt();
         main.removeCallbacksAndMessages(null);
         super.onDestroy();
     }

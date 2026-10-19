@@ -52,6 +52,7 @@ App 启动后自动开启 Web 服务，弹窗显示地址与二维码。手机�
 | v0.3.17 | 【信号表修正】依据车友 CAN-Probe `signals.json`（2534 信号全集）修正 eventId 映射：**1108=油门踏板位置(VCU_THROTTLEPOSITION)、11166=车速(ESCI_VEHICLESPEED)**（旧日志规范两映射颠倒）；新增**转向灯** BBCM_LEFT/RIGHT_STEERLAMP1-3（38697-38702）、**限速** VCU_SPEEDLIMITEDSTS/VALUE（1145/1148）、双闪开关（9108）；仪表盘车速改取权威 11166 |
 | v0.3.18 | 【播放器切换 + 方控对接】接入既有 media 三件套（MediaHub 引擎 + 媒体卡 + MediaButtonReceiver 方控转发）：主界面新增「🎵 音乐」媒体卡（4×2，玻璃卡），支持从已装应用列表选择播放器、封面/标题/艺术家展示、上一首/暂停/下一首；新增**播放器自动识别**双通道（通知栏媒体通知优先、前台应用兜底，10s 防抖，ADB 子线程不卡主线程），识别即自动接入；控制失败自动降级 shell 媒体键（85/87/88）+ 一键拉起播放器；onDestroy 注销方控转发防静态泄漏 |
 | v0.3.19 | 【手势层 + 泄漏加固】新增车机手势层 `GestureHub`（双指水平滑动识别，水平主导防滚动冲突，与单指 3D 手势共存；双指左滑暂开 3D，v0.3.20 改接分屏）+ 悬浮返回球组件 `FloatingBallView`（≥76dp 玻璃球、可拖动吸附侧边、点击回调，供分屏/容器页复用）；Logger 回调显式注销加固（v0.3.11 已改 WeakReference，onDestroy 双保险） |
+| v0.3.24 | 【主线程网络 I/O 修复】2026-10-19 装车实测：C11CarSomeIp 数据流正常（1108 油门/11166 车速/3130-3131/9121/1110 档位=1 均实测命中），但 UI 顶栏数据为 --。根因：TurnSignal360Service 轮询挂在主线程 Handler，poll() 的 Sh.run(logcat) 在主线程做 socket I/O 抛 NetworkOnMainThreadException，且与 DashboardRepository 共用 adbClient 扰乱流状态导致采集全失败。修复：轮询改专用后台线程（turn360-poll），主线程仅保留 UI 调度与防抖倒计时 |
 | v0.3.23 | 【3102 信号修正 + SOMEIP 实测闭环】2026-10-19 上车实测（热点网段 10.29.183.0/24，Kanzi 原生通道 `com.rightware.kanzi.c11carcontrol202008` 实时打 logcat `C11CarSomeIp`）：实测验证 1108=油门 / 11166=车速 / 3130-3131=电压电流 / 3102=充电器状态 / 9121=制动灯 全部与车友 signals.json 吻合；据此修正 3102（原误标"转向灯状态"→"充电器状态"，G_CHARGE 组原样展示）；未出现信号（转向灯/限速/双闪/档位）系 Kanzi 未订阅车身域，待装车打灯-双闪-挂挡验证 |
 | v0.3.22 | 【ADB 授权自动确认】无障碍服务识别 ADB 授权弹窗（systemui/settings 的 AdbAuthorize/UsbConfirm 类，实车 logcat 标定），自动点「始终允许/允许」；辅助页新增开关（默认关）。PC 端 adbkey 固定（2026-10-05 后未变），问题定位在车机 adb_keys 未记住/被重置，软件侧兜底先行 |
 | v0.3.21 | 【SOH 占位 + 摄像头预览】主界面新增「电池健康」瓦片（通道 UDS 0x722 DID 2201F2 / DoIP 13400，SOME/IP 并列，待实车标定，不放假数据，副行标注来源）；新增 FCT 摄像头预览页 `CamPreviewActivity`（lp_around 反射客户端：AIDL 14 方法全签名 + 事务码取自 FCT 反编译，`addRender→updateRenderArea→updateRelativeLayer(surfaceHandle)→showRender` + 2s 心跳；Parcel 直发 + 反射 AIDL 双模式，视角/服务名按钮供实车标定；Android 9 hidden API 豁免 + 解限） |
@@ -79,6 +80,7 @@ App 启动后自动开启 Web 服务，弹窗显示地址与二维码。手机�
 5. 回传：App 导出日志、adb logcat、Web 截图、wlan0 IP、标定结果。
 6. 【v0.3.18 音乐】媒体卡显示封面/标题/艺术家；点卡选播放器后能控制（或失败降级 shell 键生效）；自动识别日志（MediaHub「自动识别播放器[通知栏/前台应用]」）；方控按键经卡片按钮同等生效。
 7. 【v0.3.19 手势】双指水平左滑触发（日志「双指左滑」+ 打开 3D）；双指右滑仅日志；双指滑动不误触纵向滚动与单指 3D 手势。
+4. 【v0.3.24 上机验证】覆盖安装后确认顶栏车速/档位/电量出数（不再 --）；开启转向灯360辅助后打转向灯：1s 轮询不再抛 NetworkOnMainThreadException，360 正常弹出/切后视/2s 防抖；一键全测的 logcat 采集全部成功。
 5. 【v0.3.23 上机验证】覆盖安装（adb install -r）后：① 信号清单页出现"充电器状态"且数值为 0/5 原样；② 打左转向/右转向/双闪/挂挡，抓 `adb logcat -d -s C11CarSomeIp:D` 与自家 tag，看 38697-38702 / 1145 / 1148 / 9108 / 1110 是否出现（Kanzi 未订阅则转车友 CAN-Probe 全量订阅验证）；③ 回归 1108/11166 油门与车速显示正确。
 6. 【v0.3.22 上机验证】辅助页开启「ADB 授权弹窗自动确认」后，重启车机/重新 adb connect：弹窗出现时 logcat(C11Assist) 有"检测到 ADB 授权弹窗"且按钮被自动点击（始终允许→允许）；观察 adb_keys 是否写入（需 shell 读 /data/misc/adb/adb_keys）；记录弹窗包名/类名以收紧识别规则。
 7. 【v0.3.21 上机验证】SOH 瓦片显示 "--"（不放假数据，副行"待标定·UDS/DoIP"）；辅助页进入摄像头预览页：连接服务（三个候选名逐一）、点视角按钮看画面是否切换（前/后/左/右/轮/3D/俯视，数值待实车标定）、logcat(CamPreview) 确认 AIDL/Parcel 是否成功、第三方鉴权结果（被拒则回退无障碍方案）；回归 v0.3.20 全清单。
