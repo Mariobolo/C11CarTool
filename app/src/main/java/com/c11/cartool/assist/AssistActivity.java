@@ -18,6 +18,7 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.c11.cartool.Sh;
 import com.c11.cartool.vehicle.VehicleController;
 
 import java.util.ArrayList;
@@ -102,25 +103,47 @@ public class AssistActivity extends Activity {
         root.addView(s);
     }
 
-    // ── 2 多屏开机启动 ──
+    // ── 2 多屏启动：选择后立即启动一次（验证）+ 开关控制每次开机自动执行 ──
     private void buildDisplaySection() {
-        LinearLayout s = section("二、多屏开机启动（开机自动在指定屏幕启动程序）");
+        LinearLayout s = section("二、多屏启动（选择后立即启动一次验证；开关=每次开机自动执行）");
 
-        s.addView(switchRow("副驾娱乐屏（display 1）", cfg.subScreen(), cfg::setSubScreen));
+        s.addView(switchRow("副驾娱乐屏（display 1）开机自动启动", cfg.subScreen(), cfg::setSubScreen));
         subTargetText = targetText(cfg.subPkg(), cfg.subAct());
         s.addView(subTargetText);
-        s.addView(button("选择副屏程序", v -> {
+        LinearLayout subRow = new LinearLayout(this);
+        subRow.setOrientation(LinearLayout.HORIZONTAL);
+        subRow.addView(button("选择副屏程序（选中即启动一次）", v -> {
             pickingDisplay = AssistConfig.DISPLAY_SUB; pickApp();
         }));
+        subRow.addView(button("启动副屏一次", v -> startOnce(AssistConfig.DISPLAY_SUB)));
+        s.addView(subRow);
 
-        s.addView(switchRow("仪表屏（display 2）", cfg.dashScreen(), cfg::setDashScreen));
+        s.addView(switchRow("仪表屏（display 2）开机自动启动", cfg.dashScreen(), cfg::setDashScreen));
         dashTargetText = targetText(cfg.dashPkg(), cfg.dashAct());
         s.addView(dashTargetText);
-        s.addView(button("选择仪表程序", v -> {
+        LinearLayout dashRow = new LinearLayout(this);
+        dashRow.setOrientation(LinearLayout.HORIZONTAL);
+        dashRow.addView(button("选择仪表程序（选中即启动一次）", v -> {
             pickingDisplay = AssistConfig.DISPLAY_DASH; pickApp();
         }));
+        dashRow.addView(button("启动仪表一次", v -> startOnce(AssistConfig.DISPLAY_DASH)));
+        s.addView(dashRow);
 
         root.addView(s);
+    }
+
+    /** [v0.3.26] 多屏一次性启动：am start --display N（选择完自动调一次，也可手动再点）。 */
+    private void startOnce(int display) {
+        String pkg = display == AssistConfig.DISPLAY_SUB ? cfg.subPkg() : cfg.dashPkg();
+        String act = display == AssistConfig.DISPLAY_SUB ? cfg.subAct() : cfg.dashAct();
+        if (pkg == null || pkg.isEmpty() || act == null || act.isEmpty()) {
+            Toast.makeText(this, "请先选择程序", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String cmd = "am start -n " + pkg + "/" + act + " --display " + display;
+        boolean ok = Sh.run(cmd, 10000).ok();
+        Toast.makeText(this, ok ? "已启动（display " + display + "）" : "启动失败（见日志）",
+                Toast.LENGTH_SHORT).show();
     }
 
     // ── 3 限制解除 ──
@@ -198,6 +221,8 @@ public class AssistActivity extends Activity {
                         cfg.setDashTarget(e.pkg, e.act);
                         dashTargetText.setText(target(e.pkg, e.act));
                     }
+                    // [v0.3.26] 选择完立即在对应屏启动一次（验证目标可用）
+                    startOnce(pickingDisplay);
                 }).show();
     }
 

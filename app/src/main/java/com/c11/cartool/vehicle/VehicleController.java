@@ -328,6 +328,8 @@ public class VehicleController {
     public boolean exitVoice() { return controlVr("exitvr"); }
 
     // ═══ TTS 文本播报（讯飞 TtsService，startService；参数经车友 MacroDroid 验证）═══
+    // [v0.3.26] action 必须携带：TtsService.onStartCommand 对 null action 直接 NPE
+    private static final String TTS_ACTION = "com.iflytek.autofly.TtsService";
     private static final String TTS_PKG = "com.iflytek.cutefly.speechclient.hmi";
     private static final String TTS_CLS = "com.iflytek.autofly.voicecoreservice.tts.TtsService";
 
@@ -336,7 +338,9 @@ public class VehicleController {
         if (text == null || text.trim().isEmpty()) return false;
         try {
             if (Sh.isAdbConnected()) {
-                String cmd = "am startservice -n " + TTS_PKG + "/" + TTS_CLS
+                // [v0.3.26] 必须携带 action（TtsService.onStartCommand 对 null action 直接 NPE）
+                String cmd = "am startservice -a " + TTS_ACTION
+                        + " -n " + TTS_PKG + "/" + TTS_CLS
                         + " --es operation PLAY --es text " + shellQuote(text)
                         + " --es package leap --es priority high --es streamType 3"
                         + " --es audioFocusDurationHint forever";
@@ -345,7 +349,7 @@ public class VehicleController {
                 Logger.cmd(cmd, r);
                 return r.exit == 0;
             }
-            Intent i = new Intent();
+            Intent i = new Intent(TTS_ACTION);
             i.setComponent(new ComponentName(TTS_PKG, TTS_CLS));
             i.putExtra("operation", "PLAY");
             i.putExtra("text", text);

@@ -26,7 +26,7 @@ public class BootAutomationService extends Service {
 
     private static final String TAG = "BootAuto";
     private static final String CHANNEL = "c11_boot_auto";
-    private static final long WAIT_ADB_MS = 45000;
+    private static final long WAIT_ADB_MS = 90000;
 
     @Override
     public void onCreate() {

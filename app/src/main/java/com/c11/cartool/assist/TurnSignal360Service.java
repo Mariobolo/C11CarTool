@@ -11,6 +11,7 @@ import android.os.Looper;
 
 import com.c11.cartool.Logger;
 import com.c11.cartool.Sh;
+import com.c11.cartool.vehicle.LogcatVehicleSource;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -19,10 +20,14 @@ import java.util.regex.Pattern;
  * 转向灯 360 视觉辅助（前台常驻）。
  *
  * 轮询 logcat -d（1s/轮），取转向灯“最后状态”驱动状态机：
- *  - 转向开（fTurnLightCol:2）：启动 360 → 切后方镜头；若在关闭倒计时则取消（防抖重置）；
- *  - 转向关（TurnLight:0）：进入 2s 倒计时，期间再收到开则取消；到时按返回键退出 360。
+ *  - 转向开：启动 360 → 切后方镜头；若在关闭倒计时则取消（防抖重置）；
+ *  - 转向关：进入 2s 倒计时，期间再收到开则取消；到时按返回键退出 360。
  *
- * 连续转弯（关 → 2s 内又开）天然不关闭，即“2 秒防抖”。
+ * [v0.3.26] 信号改多通道（按时间序逐行扫描，最后出现状态为准）：
+ *  1. C11CarXml 结构化字段：左/右转向灯（CMSlTurnLight / CMSrTurnLight = 1/0）
+ *  2. C11CarSomeIp eventId 38697-38702（BBCM_STEERLAMP 权威源 = 1/0）
+ *  3. MacroDroid 正则兜底（CMS*.fTurnLightCol:2 / CMS.TurnLight:0）
+ * 任一通道给出“开”即开；连续转弯（关 → 2s 内又开）天然不关闭，即“2 秒防抖”。
  */
 public class TurnSignal360Service extends Service {
 
@@ -34,11 +39,14 @@ public class TurnSignal360Service extends Service {
     private static final long POLL_MS = 1000;
     private static final long CLOSE_DELAY_MS = 2000;
 
-    // 转向灯开/关（. 为通配，匹配 CMS/CMSf 等前缀）
+    // 转向灯开/关（. 为通配，匹配 CMS/CMSf 等前缀；MacroDroid 实测格式兜底）
     private static final Pattern RE_ON =
             Pattern.compile("CMS.fTurnLightCol\\s+setTextContent\\s*:\\s*2");
     private static final Pattern RE_OFF =
             Pattern.compile("CMS.TurnLight\\s+setTextContent\\s*:\\s*0");
+
+    // 结构化 XML 转向灯中文键（LogcatVehicleSource.XML_FIELDS）
+    private static final String[] TURN_XML_KEYS = {"左转向灯", "右转向灯"};
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private volatile boolean active = false;
@@ -75,18 +83,41 @@ public class TurnSignal360Service extends Service {
         return START_STICKY;
     }
 
-    /** 每轮读 logcat dump，逐行扫描并以“最后出现”的转向灯信号为准。 */
+    /** 每轮读 logcat dump，多通道解析转向灯；本轮“有任何开信号即开”（防开/关交替误判）。 */
     private void poll() {
         if (!Sh.isAdbConnected()) return;
-        Sh.Result r = Sh.run("logcat -d -v brief -s C11CarXml", 8000);
+        // 多通道一次抓取：XML 结构化字段 + SomeIP eventId 38697-38702（-b all 兜底历史缓冲）
+        Sh.Result r = Sh.run("logcat -d -b all -v brief -s C11CarXml:D C11CarSomeIp:D", 8000);
         if (r == null || r.out == null) return;
 
-        boolean lastOn = false, seen = false;
-        for (String line : r.out.split("\n")) {
-            if (RE_ON.matcher(line).find())       { lastOn = true;  seen = true; }
-            else if (RE_OFF.matcher(line).find()) { lastOn = false; seen = true; }
+        boolean anyOn = false, anyOff = false;
+
+        // 通道2/3：LogcatVehicleSource 结构化解析（XML 左/右转向灯 + eventId 38697-38702 BBCM_STEERLAMP）
+        LogcatVehicleSource.Result p = LogcatVehicleSource.parse(r.out);
+        for (String key : TURN_XML_KEYS) {
+            LogcatVehicleSource.State st = p.xmlStates.get(key);
+            if (st != null) {
+                if ("1".equals(st.raw)) anyOn = true; else anyOff = true;
+            }
         }
-        if (seen) apply(lastOn);
+        for (int id = 38697; id <= 38702; id++) {
+            LogcatVehicleSource.State st = p.eventStates.get(id);
+            if (st != null) {
+                if ("1".equals(st.raw)) anyOn = true; else anyOff = true;
+            }
+        }
+
+        // 通道1：MacroDroid 正则兜底（仅当结构化未命中转向灯信号时）
+        if (!anyOn && !anyOff) {
+            for (String line : r.out.split("\n")) {
+                if (RE_ON.matcher(line).find()) { anyOn = true; break; }
+                if (RE_OFF.matcher(line).find()) anyOff = true;
+            }
+        }
+
+        // 本轮有任何“开”信号 → 开（打灯期间日志开/关交替出现时以开为准，避免误关）；
+        // 全部为“关”/无信号 → 关。
+        if (anyOn || anyOff) apply(anyOn);
     }
 
     private void apply(boolean turnOn) {

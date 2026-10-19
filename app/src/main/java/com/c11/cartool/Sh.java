@@ -308,6 +308,13 @@ public final class Sh {
                             } catch (Exception e) {
                                 Logger.warn(TAG, "授权固化异常: " + e.getMessage());
                             }
+                            // [v0.3.26] ADB 连接成功即用 ADB 给自己授权无障碍服务
+                            // （免去手动去系统设置开启，开机自动化/ADB弹窗自动点即可用）
+                            try {
+                                Logger.info(TAG, "无障碍自授权: " + grantAssistAccess());
+                            } catch (Exception e) {
+                                Logger.warn(TAG, "无障碍自授权异常: " + e.getMessage());
+                            }
                             notifyStateChanged();
                         }
                     }
@@ -321,14 +328,47 @@ public final class Sh {
         }
     }
 
+    /**
+     * [v0.3.26] 用 ADB（shell uid=2000）为自己授权无障碍服务：
+     * pm enable 组件 + 追加写入 enabled_accessibility_services + accessibility_enabled=1。
+     * 追加而非覆盖，避免清掉用户已启用的其它无障碍服务。
+     */
+    public static String grantAssistAccess() {
+        synchronized (adbLock) {
+            if (adbClient == null || !adbClient.isConnected()) return "未连接，跳过";
+            String comp = appContext.getPackageName()
+                    + "/com.c11.cartool.assist.C11AssistService";
+            StringBuilder sb = new StringBuilder();
+            Result en = adbClient.shell("pm enable " + comp, 6000);
+            sb.append("pm enable exit=").append(en.exit);
+            Result cur = adbClient.shell(
+                    "settings get secure enabled_accessibility_services", 6000);
+            String existing = cur.out != null ? cur.out.trim() : "";
+            sb.append(" | 现有=").append(existing.isEmpty() ? "(空)" : existing);
+            if (existing.contains(comp)) {
+                sb.append(" | 已在列表，无需追加");
+            } else {
+                String merged = existing.isEmpty() ? comp : existing + ":" + comp;
+                Result put = adbClient.shell(
+                        "settings put secure enabled_accessibility_services '" + merged + "'", 6000);
+                sb.append(" | 追加 exit=").append(put.exit);
+                adbClient.shell("settings put secure accessibility_enabled 1", 5000);
+                sb.append(" | accessibility_enabled=1");
+            }
+            return sb.toString();
+        }
+    }
+
     /** 便捷方法：连接本地 adbd */
     public static boolean connectLocalAdb() {
         return connectAdb("127.0.0.1", 5555, 15000);
     }
 
     // ═══ 启动自动连接（打开 App 即后台重试）═══
-    private static final int AUTO_CONNECT_MAX_ATTEMPTS = 6;
-    private static final long AUTO_CONNECT_INTERVAL_MS = 5000;
+    // [v0.3.26] 开机策略按用户要求调整：间隔 10s、上限 90s（9 次尝试），
+    // 成功即停；全部失败后放弃自动连接（省资源，用户可点状态条手动连接）。
+    private static final int AUTO_CONNECT_MAX_ATTEMPTS = 9;
+    private static final long AUTO_CONNECT_INTERVAL_MS = 10000;
 
     /**
      * 启动时自动连接 ADB：后台最多尝试 {@value #AUTO_CONNECT_MAX_ATTEMPTS} 次，

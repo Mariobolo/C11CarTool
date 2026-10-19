@@ -412,8 +412,10 @@ public class DashboardRepository {
         snap.doorStates[5] = intOf(event(r, 9128), -1); // 前机盖
 
         // 四车窗开度%（顺序 左前 右前 左后 右后）
-        snap.windowPct[0] = intOf(event(r, 21181), -1);
-        snap.windowPct[1] = intOf(event(r, 21180), -1);
+        // [FIX-20261019] 按实测修正映射：21180=左前(主驾)、21181=右前(副驾)
+        // （下发「副驾车窗 30%」车机回报 21181=30，用户确认右前车窗动作）。
+        snap.windowPct[0] = intOf(event(r, 21180), -1);
+        snap.windowPct[1] = intOf(event(r, 21181), -1);
         snap.windowPct[2] = intOf(event(r, 21183), -1);
         snap.windowPct[3] = intOf(event(r, 21182), -1);
     }
