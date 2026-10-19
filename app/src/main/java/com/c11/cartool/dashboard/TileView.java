@@ -149,12 +149,10 @@ public class TileView extends FrameLayout {
         head.addView(valueView);
         root.addView(head);
 
-        // SeekBar：填充剩余高度，进度蓝 / 滑块白，上下留白使触摸区 ≥48dp
+        // SeekBar：填充剩余高度，车机大滑块样式（粗轨道+大圆点 thumb，触摸区 ≥48dp）
         seekBar = new SeekBar(getContext());
         seekBar.setMax(100);
-        seekBar.setProgressTintList(ColorStateList.valueOf(DashboardTheme.BLUE));
-        seekBar.setThumbTintList(ColorStateList.valueOf(DashboardTheme.PURE_WHITE));
-        seekBar.setSplitTrack(false);
+        SeekBarStyler.style(seekBar);
         seekBar.setEnabled(false);   // 真实值到达前禁用，避免在假数据上操作
         seekBar.setKeyProgressIncrement(1);
         seekBar.setPadding(dp(4), dp(10), dp(4), dp(10));

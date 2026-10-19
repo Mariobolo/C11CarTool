@@ -43,6 +43,7 @@ public final class WindowSliderDialog {
             int cur = (currentPct != null && i < currentPct.length && currentPct[i] >= 0)
                     ? currentPct[i] : 0;
             bar.setProgress(cur);
+            SeekBarStyler.style(bar);
 
             TextView val = new TextView(ctx);
             val.setText(cur + "%");

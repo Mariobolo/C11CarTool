@@ -1010,9 +1010,11 @@ public class DashboardActivity extends Activity implements DashboardRepository.C
     private void applySystemBarInsets(final View target) {
         if (target == null) return;
         target.setOnApplyWindowInsetsListener((v, insets) -> {
+            // [v0.3.25] 始终重设（不能只在 >0 时设）：系统 Dock 收起时 bottom inset
+            // 归 0，若跳过 setPadding 会残留旧 padding，底栏被顶起、下方留白。
             int top = insets.getSystemWindowInsetTop();
             int bottom = insets.getSystemWindowInsetBottom();
-            if (top > 0 || bottom > 0) v.setPadding(0, top, 0, bottom);
+            v.setPadding(0, top, 0, bottom);
             return insets;
         });
         target.requestApplyInsets();

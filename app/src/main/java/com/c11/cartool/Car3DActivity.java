@@ -88,6 +88,8 @@ public class Car3DActivity extends Activity {
                 handler.post(pusher);
             }
         });
+        // [v0.3.25] 补 loadUrl：v0.3.13 起缺失，WebView 空载导致 3D 页纯白
+        wv.loadUrl("file:///android_asset/car3d/index.html");
         host.addView(wv, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 

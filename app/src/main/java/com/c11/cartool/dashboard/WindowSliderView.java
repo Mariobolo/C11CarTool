@@ -47,6 +47,7 @@ public final class WindowSliderView extends LinearLayout {
             SeekBar bar = new SeekBar(context);
             bar.setMax(100);
             bar.setProgress(0);
+            SeekBarStyler.style(bar);
 
             TextView val = new TextView(context);
             val.setText("--");
