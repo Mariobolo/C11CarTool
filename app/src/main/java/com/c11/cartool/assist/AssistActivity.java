@@ -132,7 +132,13 @@ public class AssistActivity extends Activity {
         root.addView(s);
     }
 
-    /** [v0.3.26] 多屏一次性启动：am start --display N（选择完自动调一次，也可手动再点）。 */
+    /**
+     * [v0.3.26] 多屏一次性启动：am start --display N（选择完自动调一次，也可手动再点）。
+     * [v0.3.27] 解析 am start 输出给明确失败原因：普通第三方 app 的 launcher 活动
+     * 未经多屏适配时会被拒（Error type 3/SecurityException），车机上已知可在副屏/仪表
+     * 屏运行的入口（原车高德仪表导航 ThirdActivity 等）需要 action 上下文，故失败时
+     * 把真实原因展示出来，而不是笼统“见日志”。
+     */
     private void startOnce(int display) {
         String pkg = display == AssistConfig.DISPLAY_SUB ? cfg.subPkg() : cfg.dashPkg();
         String act = display == AssistConfig.DISPLAY_SUB ? cfg.subAct() : cfg.dashAct();
@@ -140,10 +146,29 @@ public class AssistActivity extends Activity {
             Toast.makeText(this, "请先选择程序", Toast.LENGTH_SHORT).show();
             return;
         }
+        final String label = display == AssistConfig.DISPLAY_SUB ? "副屏" : "仪表屏";
         String cmd = "am start -n " + pkg + "/" + act + " --display " + display;
-        boolean ok = Sh.run(cmd, 10000).ok();
-        Toast.makeText(this, ok ? "已启动（display " + display + "）" : "启动失败（见日志）",
-                Toast.LENGTH_SHORT).show();
+        Sh.Result r = Sh.run(cmd, 10000);
+        if (r.ok()) {
+            Toast.makeText(this, "已启动（" + label + " display " + display + "）",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String err = r.err == null ? "" : r.err;
+        String out = r.out == null ? "" : r.out.trim();
+        String all = (err + " " + out).toLowerCase();
+        String detail;
+        if (all.contains("type 3") || all.contains("does not exist"))
+            detail = "活动不存在/未安装（该程序不支持副屏启动）";
+        else if (all.contains("securityexception") || all.contains("not allowed"))
+            detail = "无权限（程序未声明多屏支持）";
+        else if (all.contains("not found"))
+            detail = "程序未找到";
+        else if (all.contains("unable to resolve"))
+            detail = "无法解析（可改用预置入口）";
+        else detail = "详见日志: " + (err.isEmpty() ? out : err);
+        if (detail.length() > 120) detail = detail.substring(0, 120) + "…";
+        Toast.makeText(this, "启动失败：" + detail, Toast.LENGTH_LONG).show();
     }
 
     // ── 3 限制解除 ──
@@ -179,8 +204,14 @@ public class AssistActivity extends Activity {
         s.addView(input);
         s.addView(button("播放", v -> {
             boolean ok = vc.speak(input.getText().toString());
-            Toast.makeText(this, ok ? "已发送播报" : "播报失败（需 ADB，见日志）",
-                    Toast.LENGTH_SHORT).show();
+            if (ok) {
+                Toast.makeText(this, "已发送播报", Toast.LENGTH_SHORT).show();
+            } else {
+                String reason = VehicleController.lastVoiceError();
+                Toast.makeText(this, reason == null || reason.isEmpty()
+                                ? "播报失败（需 ADB 连接）" : "播报失败：" + reason,
+                        Toast.LENGTH_LONG).show();
+            }
         }));
         root.addView(s);
     }

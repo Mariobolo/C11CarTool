@@ -61,6 +61,6 @@ public final class AssistConfig {
     public void setTurnSignal360(boolean v){ sp.edit().putBoolean("turn360", v).apply(); }
 
     // ── ADB 授权弹窗自动确认（无障碍点击“始终允许”，车机重启后不再手动点）──
-    public boolean adbAuthAuto()         { return sp.getBoolean("adb_auth_auto", false); }
+    public boolean adbAuthAuto()         { return sp.getBoolean("adb_auth_auto", true); }  // [v0.3.27] 默认开：车机 adb_keys 无 root 不可固化，每次连接都弹授权，需无障碍自动点“始终允许”
     public void setAdbAuthAuto(boolean v){ sp.edit().putBoolean("adb_auth_auto", v).apply(); }
 }

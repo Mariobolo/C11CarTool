@@ -180,6 +180,13 @@ public class DashboardRepository {
                     case "strCarWindowForbit":  snap.windowForbit = iv; break;
                     case "strCarMirrorHeart":   snap.mirrorHeat = iv; break;
                     case "strCarPm25":          snap.pm25 = iv; break;
+                    // [v0.3.27] 档位兜底：Kanzi 未订阅车身域（event 1110/xml gear 常缺），
+                    // settings 现成键 gear_level 可直接读（当前实车=2，P/R/N/D 映射待标定，先 raw 展示）
+                    case "gear_level":
+                        if (snap.gear == null || snap.gear.isEmpty()) {
+                            snap.gear = "raw " + iv + "（待标定）";
+                        }
+                        break;
                     case "C11_MUSIC":           snap.musicVol = iv; break;
                     case "C11_NAVI":            snap.naviVol = iv; break;
                     case "C11_SPEECH":          snap.speechVol = iv; break;
@@ -262,6 +269,8 @@ public class DashboardRepository {
             {"strCarVoiceCustom",       "系统/能耗", "语音自定义", "raw"},
             {"strCarVoiceCustom2115",   "系统/能耗", "语音自定义2115", "raw"},
             {"strCarBackMute",          "系统/能耗", "后排静音", "switch"},
+            // [v0.3.27] 档位兜底通道（Kanzi 未订阅时唯一可读来源；值域待实车标定）
+            {"gear_level",              "动力/底盘", "档位(settings)", "raw"},
         };
         for (Object[] row : m)
             SETTINGS_META.put((String) row[0],

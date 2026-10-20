@@ -71,13 +71,22 @@ public class C11AssistService extends AccessibilityService {
 
         // [v0.3.22] ADB 授权弹窗自动确认：网络/USB 调试每次连接都会弹，
         // 自动点“始终允许”让车机记住（弹窗包名/类名以实车 logcat 标定为准）。
+        // [v0.3.27] 按钮文本中英文双匹配（车机系统可能英文/中英混用）。
         if (new AssistConfig(this).adbAuthAuto() && isAuthDialog(pkg, cls)) {
             Log.i(TAG, "检测到 ADB 授权弹窗: " + pkg + "/" + cls);
-            main.postDelayed(() -> doClickText("始终允许", ok -> {
-                if (ok) { Log.i(TAG, "授权自动确认 成功(始终允许)"); return; }
-                doClickText("允许", ok2 -> Log.i(TAG, "授权自动确认 "
-                        + (ok2 ? "成功(允许)" : "失败，未见按钮（弹窗类名待标定）")));
-            }), 800);
+            main.postDelayed(() -> {
+                doClickText("始终允许", ok -> {
+                    if (ok) { Log.i(TAG, "授权自动确认 成功(始终允许)"); return; }
+                    doClickText("always allow", ok2 -> {
+                        if (ok2) { Log.i(TAG, "授权自动确认 成功(Always allow)"); return; }
+                        doClickText("允许", ok3 -> {
+                            if (ok3) { Log.i(TAG, "授权自动确认 成功(允许)"); return; }
+                            doClickText("allow", ok4 -> Log.i(TAG, "授权自动确认 "
+                                    + (ok4 ? "成功(Allow)" : "失败，未见按钮（弹窗文本/类名待标定）")));
+                        });
+                    });
+                });
+            }, 800);
             return;
         }
 

@@ -33,6 +33,62 @@ public class VehicleController {
 
     private final Context context;
 
+    // ═══ [v0.3.27] 语音类命令串行化 + 去抖 + 重试 ═══
+    // 车机讯飞语音服务（HandPlatformMessageReceiver/TtsService）串行处理请求：
+    // 滑块连续拖动/连点会并发灌入 → 服务忙时返回失败（“正忙/还不支持”）。
+    // 统一收敛到单线程串行队列，同一命令 800ms 内去抖，失败自动重试 1 次。
+    private static final java.util.concurrent.ExecutorService VOICE_EXECUTOR =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "c11-voice-queue");
+                t.setDaemon(true);
+                return t;
+            });
+    private static final long DEDUP_WINDOW_MS = 800;
+    private static final String TAG2 = "VoiceQ";
+    /** 最近一次语音命令的去抖键（area+percent / text） */
+    private static volatile String lastVoiceKey = "";
+    private static volatile long lastVoiceTime = 0;
+    /** 最近一次语音类命令失败的诊断信息（UI 提示用） */
+    private static volatile String lastVoiceError = "";
+
+    /** 最近一次语音类命令失败的诊断文本（UI 展示“失败原因”，空=最近一次成功） */
+    public static String lastVoiceError() { return lastVoiceError; }
+
+    /**
+     * 语音类命令串行执行：去抖（同键 800ms 内直接跳过）→ 队列执行 → 失败重试 1 次。
+     * @param key  去抖键（如 "window:front_left:40" / "speak:xxx"），null 不去抖
+     * @param failMsg 失败时记录的诊断前缀
+     * @param task 实际命令执行，返回成功与否
+     */
+    private static void enqueueVoice(final String key, final String failMsg,
+                                     final java.util.concurrent.Callable<Boolean> task) {
+        // 去抖：与上次同键且在窗口内 → 跳过（界面已反映，不重复打服务）
+        if (key != null) {
+            long now = System.currentTimeMillis();
+            synchronized (VehicleController.class) {
+                if (key.equals(lastVoiceKey) && now - lastVoiceTime < DEDUP_WINDOW_MS) {
+                    Log.d(TAG2, "语音命令去抖跳过: " + key);
+                    return;
+                }
+                lastVoiceKey = key;
+                lastVoiceTime = now;
+            }
+        }
+        VOICE_EXECUTOR.submit(() -> {
+            try {
+                if (task.call()) { return; }
+                // 失败：等 600ms 重试 1 次（服务忙瞬时失败常见）
+                try { Thread.sleep(600); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+                if (task.call()) { return; }
+                lastVoiceError = failMsg + "（重试后仍失败，详见日志）";
+                Log.e(TAG2, "语音命令失败: " + failMsg);
+            } catch (Exception e) {
+                lastVoiceError = failMsg + ": " + e.getMessage();
+                Log.e(TAG2, "语音命令异常: " + failMsg, e);
+            }
+        });
+    }
+
     /** 最近一次 shell 通道执行结果（一键全测读取，含 exit/stdout/stderr/通道）；Intent 通道为 null */
     private static volatile com.c11.cartool.Sh.Result lastResult;
     /** 线程本地镜像：并发命令不串味（一键全测按线程取本次结果） */
@@ -251,9 +307,15 @@ public class VehicleController {
     public boolean closeTrunk() { return sendVoice("carControl", obj().put("operation", "CLOSE").put("name", "后备箱")); }
 
     // ═══ 车窗 — handMessage ═══
+    /**
+     * 车窗设定（handMessage 语音家族通道，串行队列执行）。
+     * [v0.3.27] 车窗滑块高频拖动 → 语音服务串行处理忙时失败（“正忙/还不支持”）：
+     * 改走统一语音队列（同窗同开度 800ms 去抖 + 失败重试 1 次）。
+     * @return 已入队即返回 true；实际执行结果与失败原因见 {@link #lastVoiceError()}
+     */
     public boolean setWindow(String area, int percent) {
         percent = Math.max(0, Math.min(100, percent));
-        String name;
+        final String name;
         switch (area) {
             case "front_left":  name = "主驾车窗"; break;
             case "front_right": name = "副驾车窗"; break;
@@ -261,9 +323,13 @@ public class VehicleController {
             case "rear_right":  name = "右后车窗"; break;
             default: return false;
         }
-        return sendVoice("carControl", obj()
-                .put("operation", "SET").put("name", name)
-                .put("nameValue", percent + "%").put("targetScope", "vehicle"));
+        final int pct = percent;
+        final String dedupKey = "window:" + area + ":" + percent;
+        enqueueVoice(dedupKey, "车窗[" + name + "=" + pct + "%]下发失败",
+                () -> sendVoice("carControl", obj()
+                        .put("operation", "SET").put("name", name)
+                        .put("nameValue", pct + "%").put("targetScope", "vehicle")));
+        return true;
     }
 
     /** 按讯飞车窗名直接设定开度（仪表盘车窗档位卡用，名字→区域映射归车辆层） */
@@ -333,9 +399,22 @@ public class VehicleController {
     private static final String TTS_PKG = "com.iflytek.cutefly.speechclient.hmi";
     private static final String TTS_CLS = "com.iflytek.autofly.voicecoreservice.tts.TtsService";
 
-    /** 让小零播报任意文本（ADB 走 startservice；无 ADB 时本地 startService 兜底）。 */
+    /**
+     * 让小零播报任意文本（ADB 走 startservice；无 ADB 时本地 startService 兜底）。
+     * [v0.3.27] 走语音串行队列：TTS 与车窗等语音命令互不抢占（讯飞服务忙时
+     * 返回失败/静默）；失败重试 1 次，诊断写入 {@link #lastVoiceError()}。
+     * @return 已入队即返回 true（文本为空返回 false）
+     */
     public boolean speak(String text) {
         if (text == null || text.trim().isEmpty()) return false;
+        final String txt = text.trim();
+        enqueueVoice("speak:" + txt, "TTS 播报失败",
+                () -> speakNow(txt));
+        return true;
+    }
+
+    /** 实际执行一次 TTS 播报（同步，带 ADB 命令与本地 Intent 双分支）。 */
+    private boolean speakNow(String text) {
         try {
             if (Sh.isAdbConnected()) {
                 // [v0.3.26] 必须携带 action（TtsService.onStartCommand 对 null action 直接 NPE）
