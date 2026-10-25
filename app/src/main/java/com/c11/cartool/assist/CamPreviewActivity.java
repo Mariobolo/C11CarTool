@@ -17,6 +17,8 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.lang.reflect.Method;
+import java.io.File;
+import java.util.concurrent.Callable;
 
 /**
  * [v0.3.21] FCT 摄像头预览 demo 页（lp_around 反射客户端）
@@ -60,6 +62,7 @@ public class CamPreviewActivity extends Activity {
 
     private SurfaceView surfaceView;
     private TextView statusView;
+    private TextView qcLogView;   // [v0.3.28] QCarCam 结果回显
     private IBinder binder;           // 当前服务 binder
     private String serviceName = "";
     private Object renderApi;         // 模式 A 的 AIDL 代理（null 则用模式 B）
@@ -173,6 +176,67 @@ public class CamPreviewActivity extends Activity {
         note.setPadding(dp(8), dp(6), dp(8), dp(6));
         ctl.addView(note);
 
+        // [v0.3.28] QCarCam 原生直采（灵眸引擎：cam_enum/cam_probe/xp_capture + libais_client.so）
+        ctl.addView(sectionTitle("QCarCam 直采（高通8155 原生，灵眸机制）"));
+        qcLogView = new TextView(this);
+        qcLogView.setTextSize(12);
+        qcLogView.setTextColor(0xFFB0BEC5);
+        qcLogView.setText("未运行");
+        LinearLayout qcRow1 = row();
+        qcRow1.addView(button("枚举input表", v -> bg("cam_enum", () ->
+                QCarCamEngine.enumInputs(this))));
+        qcRow1.addView(button("逐路开流标定", v -> bg("cam_probe --full（180s，勿急）", () ->
+                QCarCamEngine.probeAll(this))));
+        ctl.addView(qcRow1);
+        LinearLayout qcRow2 = row();
+        for (int cam = 0; cam < 4; cam++) {
+            final int c = cam;
+            qcRow2.addView(button("录cam" + c + " 5s", v -> bg("xp_capture --cam " + c, () -> {
+                File f = new File(getFilesDir(), "qccam/out_cam" + c + ".uyvy");
+                return QCarCamEngine.capture(this, c, f, 5, 30);
+            })));
+        }
+        ctl.addView(qcRow2);
+        TextView qcHint = smallNote("0:Front 1:Right 2:Rear 3:Left（零跑BSP可能重映射，以标定结果为准）；"
+                + "UYVY 原始帧落 filesDir/qccam/out_camN.uyvy");
+        ctl.addView(qcHint);
+        ctl.addView(qcLogView);
+
+        // [v0.3.28] 系统 AVM 控制（lmos.framework.core.cam.AvmCtrlManager 反射）
+        ctl.addView(sectionTitle("AVM 控制（lmos 反射，实车标定参数）"));
+        final TextView avmLog = new TextView(this);
+        avmLog.setTextSize(12);
+        avmLog.setTextColor(0xFFB0BEC5);
+        avmLog.setText("未调用");
+        LinearLayout avmRow1 = row();
+        String[] angles = {"角0,0", "角1,0", "角2,0", "角3,0"};
+        for (int i = 0; i < angles.length; i++) {
+            final int a = i;
+            avmRow1.addView(button(angles[i], v -> {
+                boolean ok = AvmCtrlReflect.switchAngle(a, 0);
+                avmLog.setText("switchAngle(" + a + ",0) = " + ok + "（详情见 logcat AvmCtrl）");
+            }));
+        }
+        ctl.addView(avmRow1);
+        LinearLayout avmRow2 = row();
+        avmRow2.addView(button("rotate3D(0,0)", v -> {
+            boolean ok = AvmCtrlReflect.rotate3D(0, 0);
+            avmLog.setText("rotate3D(0,0) = " + ok);
+        }));
+        avmRow2.addView(button("enableTrack(true)", v -> {
+            boolean ok = AvmCtrlReflect.enableTrack(true);
+            avmLog.setText("enableTrack(true) = " + ok);
+        }));
+        avmRow2.addView(button("enableTs(true)", v -> {
+            boolean ok = AvmCtrlReflect.enableTs(true);
+            avmLog.setText("enableTs(true) = " + ok);
+        }));
+        ctl.addView(avmRow2);
+        TextView avmHint = smallNote("AVM 走系统渲染（含鸟瞰/3D合成），与上方 QCarCam 直采互补；"
+                + "参数值域未标定，实车逐个试并看画面/logcat(AvmCtrl)。");
+        ctl.addView(avmHint);
+        ctl.addView(avmLog);
+
         sv.addView(ctl);
         root.addView(sv, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
@@ -183,6 +247,42 @@ public class CamPreviewActivity extends Activity {
         LinearLayout r = new LinearLayout(this);
         r.setOrientation(LinearLayout.HORIZONTAL);
         return r;
+    }
+
+    private TextView sectionTitle(String t) {
+        TextView tv = new TextView(this);
+        tv.setText(t);
+        tv.setTextSize(16);
+        tv.setTextColor(0xFF80DEEA);
+        tv.setPadding(dp(8), dp(14), dp(8), dp(4));
+        return tv;
+    }
+
+    private TextView smallNote(String t) {
+        TextView tv = new TextView(this);
+        tv.setText(t);
+        tv.setTextSize(12);
+        tv.setTextColor(0xFF78909C);
+        tv.setPadding(dp(8), dp(2), dp(8), dp(4));
+        return tv;
+    }
+
+    /** 后台线程执行引擎调用，完成后把输出回显到 qcLogView（QCarCam 区）。 */
+    private void bg(final String label, final Callable<QCarCamEngine.Result> task) {
+        final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+        Toast.makeText(this, "开始: " + label, Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            QCarCamEngine.Result r;
+            try { r = task.call(); }
+            catch (Exception e) { r = new QCarCamEngine.Result(false, "", "异常: " + e.getMessage()); }
+            final QCarCamEngine.Result rr = r;
+            final String out = (rr.ok ? "[完成] " : "[失败] ") + label + "\n" + rr.detail();
+            h.post(() -> {
+                if (qcLogView != null) qcLogView.setText(out);
+                Toast.makeText(this, label + (rr.ok ? " 完成" : " 失败（见结果区）"),
+                        Toast.LENGTH_LONG).show();
+            });
+        }, "qccam-bg").start();
     }
 
     private Button button(String text, View.OnClickListener l) {
